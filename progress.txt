@@ -1,0 +1,141 @@
+INSTAGRAM-HUBSPOT FILTERED BRIDGE - PROGRESS LOG
+================================================
+
+Last Updated: 2026-02-12
+
+STATUS: LIVE (inbound working, outbound pending Meta App Review)
+-----------------------------------------------------------------
+
+COMPLETED:
+----------
+[x] Project specification (SPEC.md)
+[x] Architecture design - Cloudflare Worker
+[x] All source code written:
+    - OAuth flow (token exchange, auto-refresh, KV storage)
+    - Instagram webhook handler (signature warn-only)
+    - HubSpot message forwarding (Custom Channels API)
+    - HubSpot outbound reply handler (parses OUTGOING_CHANNEL_MESSAGE_CREATED)
+    - Instagram profile fetch (graph.facebook.com/v21.0)
+    - Filter logic (verified, followers, media)
+    - Channel account connection flow
+[x] Meta/Instagram credentials configured
+[x] Meta App published (live mode)
+[x] HubSpot Public App created with OAuth (6 scopes)
+[x] HubSpot Custom Channel registered
+[x] Channel connected in HubSpot Help Desk
+[x] Worker deployed to Cloudflare Workers
+[x] KV namespace created
+[x] All 7 secrets set via wrangler secret put
+[x] Instagram webhook configured and receiving DMs
+[x] Messages forwarding to HubSpot inbox successfully
+[x] HubSpot agent replies trigger outbound webhook to worker
+[x] Outbound handler parses HubSpot payload and extracts recipient IGSID
+[x] README.md created
+
+WORKING:
+--------
+- Inbound: Instagram DM → Worker → Filter → HubSpot inbox
+- HubSpot OAuth token auto-refresh (every 30 min)
+- Profile caching in KV (24h TTL)
+- Media message filtering (image/video/audio skipped)
+- Fail-open for personal IG accounts (can't fetch profile data)
+
+NOT YET WORKING:
+----------------
+- Outbound: HubSpot reply → Worker → Instagram
+  BLOCKED ON: Meta App Review for `instagram_manage_messages` permission
+  Status: "Ready for testing" — needs to be submitted via App Review
+  Error: "(#3) Application does not have the capability to make this API call"
+  Action: Submit `instagram_manage_messages` for App Review in Meta Dashboard
+  Review typically takes 1-5 business days
+
+- Webhook signature verification: HMAC mismatch between computed and
+  Meta-provided signatures. Currently warn-only (not blocking requests).
+  Secret confirmed correct (32 chars). Root cause unknown.
+  TODO in src/handlers/instagram.ts
+
+- Profile filtering for personal IG accounts: The graph.facebook.com API
+  returns 400 for personal accounts. Only Business/Creator accounts return
+  follower_count and is_verified_user. Personal accounts are forwarded
+  to HubSpot by default (fail-open). This is by design per SPEC.md.
+
+NEXT STEPS:
+-----------
+1. Submit `instagram_manage_messages` for Meta App Review
+   - Meta Dashboard > App Review > Permissions and Features
+   - Press "Add to App Review" and submit
+   - Provide use case description and screencast
+   - Wait for approval (1-5 business days)
+
+2. After approval: test outbound reply flow
+   - Reply from HubSpot inbox
+   - Verify message arrives on Instagram
+   - Check wrangler tail for "Sent reply to Instagram user" log
+
+3. (Optional) Investigate webhook signature mismatch
+   - App secret confirmed correct
+   - HMAC-SHA256 computed hash doesn't match Meta-provided hash
+   - Tried both request.text() and request.arrayBuffer() — same result
+
+DEPLOYMENT:
+-----------
+Worker URL: https://instagram-hubspot-bridge.soft-smoke-9baf.workers.dev
+
+Endpoints:
+  GET  /                          Health check
+  GET  /webhook/instagram         Meta webhook verification
+  POST /webhook/instagram         Incoming Instagram DMs
+  POST /webhook/hubspot           Outbound replies from HubSpot
+  GET  /auth/hubspot              Initiate HubSpot OAuth
+  GET  /auth/hubspot/callback     OAuth callback
+  GET  /connect/hubspot           Channel account connection flow
+
+CREDENTIALS:
+------------
+All secrets stored via `wrangler secret put` and in .dev.vars (gitignored).
+Never commit secrets to this file or any tracked file.
+
+[x] META_APP_SECRET
+[x] META_PAGE_ACCESS_TOKEN (set 2026-02-12, expires ~2026-04-12)
+[x] INSTAGRAM_PAGE_ID
+[x] WEBHOOK_VERIFY_TOKEN
+[x] HUBSPOT_CLIENT_ID
+[x] HUBSPOT_CLIENT_SECRET
+[x] HUBSPOT_CUSTOM_CHANNEL_ID
+
+KEY TECHNICAL NOTES:
+--------------------
+- Profile fetch uses graph.facebook.com/v21.0/{IGSID} (not graph.instagram.com)
+- Field mapping: API returns is_verified_user, code maps to is_verified
+- Falls back to "name" field if "username" not available
+- Send message uses /{INSTAGRAM_PAGE_ID}/messages (not /me/messages)
+- HubSpot outbound webhook type: OUTGOING_CHANNEL_MESSAGE_CREATED
+- Recipient IGSID at: payload.message.recipients[0].deliveryIdentifier.value
+- Message text at: payload.message.text
+- HubSpot channel uses CHANNEL_SPECIFIC_OPAQUE_ID (not HS_EMAIL_ADDRESS)
+- Channel account ID fetched from API on first message, then cached in KV
+- HubSpot 409 on channel connect = already exists, treated as success
+
+FILES:
+------
+.
+├── SPEC.md
+├── README.md
+├── progress.txt
+├── package.json
+├── tsconfig.json
+├── wrangler.toml
+├── .dev.vars               # Local dev secrets (gitignored)
+├── .gitignore
+└── src/
+    ├── index.ts            # Main router + OAuth + connect routes
+    ├── types.ts
+    ├── handlers/
+    │   ├── instagram.ts    # Webhook handler (signature warn-only)
+    │   └── hubspot.ts      # Outbound reply handler
+    ├── services/
+    │   ├── instagram-api.ts  # Profile fetch + send message
+    │   ├── hubspot-api.ts    # OAuth tokens + channel account + forwarding
+    │   └── filter.ts         # Filtering logic
+    └── utils/
+        └── crypto.ts       # HMAC-SHA256 signature verification

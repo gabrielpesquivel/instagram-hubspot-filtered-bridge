@@ -1,0 +1,22 @@
+name = "instagram-hubspot-bridge"
+main = "src/index.ts"
+compatibility_date = "2025-02-10"
+
+# KV namespace for caching Instagram profiles
+[[kv_namespaces]]
+binding = "PROFILE_CACHE"
+id = "db904047158e47118ea28704c475a41b"
+
+# Environment variables (non-secret)
+[vars]
+FILTER_MIN_FOLLOWERS = "5000"
+CACHE_TTL_SECONDS = "86400"
+
+# Secrets (set via `wrangler secret put <NAME>`):
+# - META_APP_SECRET
+# - META_PAGE_ACCESS_TOKEN
+# - INSTAGRAM_PAGE_ID
+# - WEBHOOK_VERIFY_TOKEN
+# - HUBSPOT_CLIENT_ID
+# - HUBSPOT_CLIENT_SECRET
+# - HUBSPOT_CUSTOM_CHANNEL_ID
