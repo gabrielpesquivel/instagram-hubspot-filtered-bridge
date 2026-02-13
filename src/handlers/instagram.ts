@@ -35,7 +35,6 @@ export async function handleWebhook(
   const rawBodyBytes = new Uint8Array(rawBodyBuffer);
   const rawBody = new TextDecoder().decode(rawBodyBytes);
 
-  // Signature verification (warn-only until secret mismatch is resolved)
   const signature = request.headers.get("x-hub-signature-256");
   const isValid = await verifyWebhookSignatureBytes(
     rawBodyBytes,
@@ -44,8 +43,8 @@ export async function handleWebhook(
   );
 
   if (!isValid) {
-    // TODO: Change back to rejecting once signature issue is resolved
-    console.warn("Webhook signature mismatch - processing anyway");
+    console.error("Instagram webhook signature verification failed");
+    return new Response("Unauthorized", { status: 401 });
   }
 
   // Parse payload

@@ -41,6 +41,36 @@ export async function verifyWebhookSignatureBytes(
 }
 
 /**
+ * Verify HubSpot webhook signature (v2)
+ * Hash = SHA-256(clientSecret + httpMethod + httpUrl + requestBody)
+ */
+export async function verifyHubSpotSignature(
+  httpMethod: string,
+  httpUrl: string,
+  rawBody: string,
+  signature: string | null,
+  clientSecret: string
+): Promise<boolean> {
+  if (!signature) {
+    return false;
+  }
+
+  const sourceString = clientSecret + httpMethod + httpUrl + rawBody;
+
+  const encoder = new TextEncoder();
+  const hashBuffer = await crypto.subtle.digest(
+    "SHA-256",
+    encoder.encode(sourceString)
+  );
+
+  const computedHash = Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  return secureCompare(computedHash, signature);
+}
+
+/**
  * Constant-time string comparison to prevent timing attacks
  */
 function secureCompare(a: string, b: string): boolean {

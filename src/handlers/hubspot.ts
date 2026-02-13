@@ -1,5 +1,6 @@
 import type { Env } from "../types";
 import { sendMessage } from "../services/instagram-api";
+import { verifyHubSpotSignature } from "../utils/crypto";
 
 /**
  * Handle outbound messages from HubSpot
@@ -9,10 +10,27 @@ export async function handleHubSpotWebhook(
   request: Request,
   env: Env
 ): Promise<Response> {
+  const rawBody = await request.text();
+
+  // Verify HubSpot signature
+  const signature = request.headers.get("x-hubspot-signature-v2");
+  const isValid = await verifyHubSpotSignature(
+    request.method,
+    request.url,
+    rawBody,
+    signature,
+    env.HUBSPOT_CLIENT_SECRET
+  );
+
+  if (!isValid) {
+    console.error("HubSpot webhook signature verification failed");
+    return new Response("Unauthorized", { status: 401 });
+  }
+
   let payload: HubSpotOutboundPayload;
 
   try {
-    payload = await request.json();
+    payload = JSON.parse(rawBody);
   } catch {
     return new Response("Invalid JSON", { status: 400 });
   }
