@@ -2,6 +2,12 @@ import type { Env } from "./types";
 import { handleVerification, handleWebhook } from "./handlers/instagram";
 import { handleHubSpotWebhook } from "./handlers/hubspot";
 import {
+  handleLogin,
+  handleLogout,
+  handleStats,
+  handleHealth,
+} from "./handlers/dashboard";
+import {
   exchangeCodeForTokens,
   finalizeChannelConnection,
 } from "./services/hubspot-api";
@@ -21,11 +27,18 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // Health check
-    if (path === "/" && request.method === "GET") {
-      return new Response("Instagram-HubSpot Bridge is running", {
-        status: 200,
-      });
+    // Dashboard API
+    if (path === "/api/login" && request.method === "POST") {
+      return handleLogin(request, env);
+    }
+    if (path === "/api/logout" && request.method === "POST") {
+      return handleLogout(request, env);
+    }
+    if (path === "/api/stats" && request.method === "GET") {
+      return handleStats(request, env);
+    }
+    if (path === "/api/health" && request.method === "GET") {
+      return handleHealth(request, env);
     }
 
     // Instagram webhook
@@ -134,6 +147,7 @@ export default {
       }
     }
 
-    return new Response("Not Found", { status: 404 });
+    // Serve static assets / SPA fallback
+    return env.ASSETS.fetch(request);
   },
 };

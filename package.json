@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "build:dashboard": "cd dashboard && npm install && npm run build",
+    "deploy": "npm run build:dashboard && wrangler deploy",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

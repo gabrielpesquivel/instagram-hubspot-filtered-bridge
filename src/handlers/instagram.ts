@@ -3,6 +3,7 @@ import { verifyWebhookSignatureBytes } from "../utils/crypto";
 import { getUserProfile } from "../services/instagram-api";
 import { forwardMessage } from "../services/hubspot-api";
 import { shouldForwardMessage } from "../services/filter";
+import { incrementStat } from "../services/stats";
 
 /**
  * Handle Instagram webhook verification (GET request)
@@ -100,6 +101,13 @@ async function processMessage(
       console.log(
         `Skipping message from ${senderId}: ${filterResult.reason}`
       );
+      const reasonMap: Record<string, string> = {
+        verified: "skipped:verified",
+        high_followers: "skipped:high_followers",
+        media_message: "skipped:media",
+      };
+      const statKey = reasonMap[filterResult.reason];
+      if (statKey) await incrementStat(statKey, env);
       return;
     }
 
@@ -115,8 +123,10 @@ async function processMessage(
 
     if (success) {
       console.log(`Forwarded message from ${senderId} to HubSpot`);
+      await incrementStat("forwarded", env);
     }
   } catch (error) {
     console.error(`Error processing message from ${senderId}:`, error);
+    await incrementStat("errors", env);
   }
 }

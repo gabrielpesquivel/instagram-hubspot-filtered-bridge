@@ -1,6 +1,7 @@
 import type { Env } from "../types";
 import { sendMessage } from "../services/instagram-api";
 import { verifyHubSpotSignature } from "../utils/crypto";
+import { incrementStat } from "../services/stats";
 
 /**
  * Handle outbound messages from HubSpot
@@ -57,6 +58,7 @@ export async function handleHubSpotWebhook(
 
   if (success) {
     console.log(`Sent reply to Instagram user ${recipientId}`);
+    await incrementStat("replied", env);
   } else {
     console.error(`Failed to send reply to Instagram user ${recipientId}`);
   }

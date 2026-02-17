@@ -17,6 +17,10 @@ export interface Env {
   // Configuration
   FILTER_MIN_FOLLOWERS: string;
   CACHE_TTL_SECONDS: string;
+
+  // Dashboard
+  ASSETS: Fetcher;
+  DASHBOARD_PASSWORD: string;
 }
 
 // Instagram Webhook Payload
