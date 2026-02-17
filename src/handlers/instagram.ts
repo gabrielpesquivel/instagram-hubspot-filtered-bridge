@@ -124,6 +124,9 @@ async function processMessage(
     if (success) {
       console.log(`Forwarded message from ${senderId} to HubSpot`);
       await incrementStat("forwarded", env);
+    } else {
+      console.error(`Failed to forward message from ${senderId} to HubSpot`);
+      await incrementStat("errors", env);
     }
   } catch (error) {
     console.error(`Error processing message from ${senderId}:`, error);
