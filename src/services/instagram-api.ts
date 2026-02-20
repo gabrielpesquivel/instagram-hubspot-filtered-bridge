@@ -1,4 +1,5 @@
 import type { Env, InstagramUserProfile, CachedProfile } from "../types";
+import { cerr } from "./logger";
 
 const GRAPH_API_BASE = "https://graph.facebook.com/v21.0";
 
@@ -76,10 +77,7 @@ async function fetchProfileFromApi(
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(
-        `Failed to fetch profile for ${userId}: ${response.status}`,
-        errorBody
-      );
+      await cerr(env, `Failed to fetch profile for ${userId}: ${response.status}`, errorBody);
       return { id: userId };
     }
 
@@ -92,7 +90,7 @@ async function fetchProfileFromApi(
       is_verified: (data.is_verified_user ?? data.is_verified) as boolean | undefined,
     };
   } catch (error) {
-    console.error(`Error fetching profile for ${userId}:`, error);
+    await cerr(env, `Error fetching profile for ${userId}:`, error);
     return { id: userId };
   }
 }
@@ -124,13 +122,13 @@ export async function sendMessage(
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`Failed to send message: ${response.status}`, errorBody);
+      await cerr(env, `Failed to send message: ${response.status}`, errorBody);
       return false;
     }
 
     return true;
   } catch (error) {
-    console.error("Error sending message:", error);
+    await cerr(env, "Error sending message:", error);
     return false;
   }
 }

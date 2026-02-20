@@ -1,7 +1,8 @@
 import type { Env } from "../types";
 import { sendMessage } from "../services/instagram-api";
 import { verifyHubSpotSignature } from "../utils/crypto";
-import { incrementStat } from "../services/stats";
+import { incrementStat, appendLog } from "../services/stats";
+import { clog, cerr } from "../services/logger";
 
 /**
  * Handle outbound messages from HubSpot
@@ -24,7 +25,7 @@ export async function handleHubSpotWebhook(
   );
 
   if (!isValid) {
-    console.error("HubSpot webhook signature verification failed");
+    await cerr(env, "HubSpot webhook signature verification failed");
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -50,17 +51,25 @@ export async function handleHubSpotWebhook(
   const recipientId = recipient.deliveryIdentifier?.value;
 
   if (!recipientId) {
-    console.error("No recipient delivery identifier found");
+    await cerr(env, "No recipient delivery identifier found");
     return new Response("OK", { status: 200 });
   }
 
   const success = await sendMessage(recipientId, message.text, env);
 
   if (success) {
-    console.log(`Sent reply to Instagram user ${recipientId}`);
+    await clog(env, `Sent reply to Instagram user ${recipientId}`);
     await incrementStat("replied", env);
+    await appendLog({
+      type: "replied",
+      message: `Reply sent to ${recipientId} — "${(message.text || "").slice(0, 80)}"`,
+    }, env);
   } else {
-    console.error(`Failed to send reply to Instagram user ${recipientId}`);
+    await cerr(env, `Failed to send reply to Instagram user ${recipientId}`);
+    await appendLog({
+      type: "error",
+      message: `Failed to send reply to ${recipientId}`,
+    }, env);
   }
 
   return new Response("OK", { status: 200 });

@@ -32,7 +32,7 @@ export interface InstagramWebhookPayload {
 export interface InstagramEntry {
   id: string;
   time: number;
-  messaging: InstagramMessaging[];
+  messaging?: InstagramMessaging[];
 }
 
 export interface InstagramMessaging {

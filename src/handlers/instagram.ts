@@ -1,23 +1,24 @@
-import type { Env, InstagramWebhookPayload } from "../types";
+import type { Env, InstagramWebhookPayload, InstagramMessaging } from "../types";
 import { verifyWebhookSignatureBytes } from "../utils/crypto";
 import { getUserProfile } from "../services/instagram-api";
 import { forwardMessage } from "../services/hubspot-api";
 import { shouldForwardMessage } from "../services/filter";
-import { incrementStat } from "../services/stats";
+import { incrementStat, appendLog } from "../services/stats";
+import { clog, cerr } from "../services/logger";
 
 /**
  * Handle Instagram webhook verification (GET request)
  */
-export function handleVerification(
+export async function handleVerification(
   url: URL,
   env: Env
-): Response {
+): Promise<Response> {
   const mode = url.searchParams.get("hub.mode");
   const token = url.searchParams.get("hub.verify_token");
   const challenge = url.searchParams.get("hub.challenge");
 
   if (mode === "subscribe" && token === env.WEBHOOK_VERIFY_TOKEN) {
-    console.log("Webhook verified");
+    await clog(env, "Webhook verified");
     return new Response(challenge, { status: 200 });
   }
 
@@ -44,7 +45,7 @@ export async function handleWebhook(
   );
 
   if (!isValid) {
-    console.error("Instagram webhook signature verification failed");
+    await cerr(env, "Instagram webhook signature verification failed");
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -63,6 +64,9 @@ export async function handleWebhook(
 
   // Process each entry
   for (const entry of payload.entry) {
+    if (!entry.messaging) {
+      continue;
+    }
     for (const messaging of entry.messaging) {
       await processMessage(messaging, env);
     }
@@ -73,7 +77,7 @@ export async function handleWebhook(
 }
 
 async function processMessage(
-  messaging: InstagramWebhookPayload["entry"][0]["messaging"][0],
+  messaging: InstagramMessaging,
   env: Env
 ): Promise<void> {
   const { sender, message } = messaging;
@@ -97,17 +101,26 @@ async function processMessage(
     // Apply filter
     const filterResult = shouldForwardMessage(profile, message, env);
 
+    const senderLabel = profile.username ? `@${profile.username}` : senderId;
+
     if (!filterResult.shouldForward) {
-      console.log(
-        `Skipping message from ${senderId}: ${filterResult.reason}`
-      );
+      await clog(env, `Skipping message from ${senderId}: ${filterResult.reason}`);
       const reasonMap: Record<string, string> = {
         verified: "skipped:verified",
         high_followers: "skipped:high_followers",
         media_message: "skipped:media",
       };
+      const reasonLabels: Record<string, string> = {
+        verified: "verified account",
+        high_followers: `${profile.follower_count?.toLocaleString()} followers`,
+        media_message: "media attachment",
+      };
       const statKey = reasonMap[filterResult.reason];
       if (statKey) await incrementStat(statKey, env);
+      await appendLog({
+        type: "skipped",
+        message: `${senderLabel} — ${reasonLabels[filterResult.reason] || filterResult.reason}`,
+      }, env);
       return;
     }
 
@@ -122,14 +135,26 @@ async function processMessage(
     );
 
     if (success) {
-      console.log(`Forwarded message from ${senderId} to HubSpot`);
+      await clog(env, `Forwarded message from ${senderId} to HubSpot`);
       await incrementStat("forwarded", env);
+      await appendLog({
+        type: "forwarded",
+        message: `${senderLabel} — "${(message.text || "").slice(0, 80)}"`,
+      }, env);
     } else {
-      console.error(`Failed to forward message from ${senderId} to HubSpot`);
+      await cerr(env, `Failed to forward message from ${senderId} to HubSpot`);
       await incrementStat("errors", env);
+      await appendLog({
+        type: "error",
+        message: `Failed to forward message from ${senderLabel}`,
+      }, env);
     }
   } catch (error) {
-    console.error(`Error processing message from ${senderId}:`, error);
+    await cerr(env, `Error processing message from ${senderId}:`, error);
     await incrementStat("errors", env);
+    await appendLog({
+      type: "error",
+      message: `Error processing message from ${senderId}: ${error instanceof Error ? error.message : String(error)}`,
+    }, env);
   }
 }

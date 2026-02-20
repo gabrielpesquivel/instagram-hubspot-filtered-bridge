@@ -1,4 +1,5 @@
 import type { Env, HubSpotIncomingMessage } from "../types";
+import { clog, cerr } from "./logger";
 
 const HUBSPOT_API_BASE = "https://api.hubapi.com";
 const OAUTH_TOKEN_URL = `${HUBSPOT_API_BASE}/oauth/v1/token`;
@@ -37,7 +38,7 @@ export async function exchangeCodeForTokens(
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`HubSpot token exchange failed: ${response.status}`, errorBody);
+      await cerr(env, `HubSpot token exchange failed: ${response.status}`, errorBody);
       return null;
     }
 
@@ -54,10 +55,10 @@ export async function exchangeCodeForTokens(
     };
 
     await env.PROFILE_CACHE.put(KV_TOKEN_KEY, JSON.stringify(tokens));
-    console.log("HubSpot OAuth tokens stored successfully");
+    await clog(env, "HubSpot OAuth tokens stored successfully");
     return tokens;
   } catch (error) {
-    console.error("Error exchanging HubSpot auth code:", error);
+    await cerr(env, "Error exchanging HubSpot auth code:", error);
     return null;
   }
 }
@@ -69,7 +70,7 @@ async function getAccessToken(env: Env): Promise<string | null> {
   const stored = await env.PROFILE_CACHE.get(KV_TOKEN_KEY);
 
   if (!stored) {
-    console.error("No HubSpot OAuth tokens found. Run /auth/hubspot to authorize.");
+    await cerr(env, "No HubSpot OAuth tokens found. Run /auth/hubspot to authorize.");
     return null;
   }
 
@@ -107,7 +108,7 @@ async function refreshAccessToken(
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`HubSpot token refresh failed: ${response.status}`, errorBody);
+      await cerr(env, `HubSpot token refresh failed: ${response.status}`, errorBody);
       return null;
     }
 
@@ -124,10 +125,10 @@ async function refreshAccessToken(
     };
 
     await env.PROFILE_CACHE.put(KV_TOKEN_KEY, JSON.stringify(tokens));
-    console.log("HubSpot OAuth tokens refreshed successfully");
+    await clog(env, "HubSpot OAuth tokens refreshed successfully");
     return tokens.access_token;
   } catch (error) {
-    console.error("Error refreshing HubSpot token:", error);
+    await cerr(env, "Error refreshing HubSpot token:", error);
     return null;
   }
 }
@@ -197,7 +198,7 @@ async function getChannelAccountId(env: Env): Promise<string | null> {
     });
 
     if (!response.ok) {
-      console.error(`Failed to fetch channel accounts: ${response.status}`);
+      await cerr(env, `Failed to fetch channel accounts: ${response.status}`);
       return null;
     }
 
@@ -206,16 +207,16 @@ async function getChannelAccountId(env: Env): Promise<string | null> {
     };
 
     if (data.results.length === 0) {
-      console.error("No channel accounts found");
+      await cerr(env, "No channel accounts found");
       return null;
     }
 
     const accountId = data.results[0].id;
     await env.PROFILE_CACHE.put(KV_CHANNEL_ACCOUNT_ID_KEY, accountId);
-    console.log("Cached HubSpot channel account ID:", accountId);
+    await clog(env, "Cached HubSpot channel account ID:", accountId);
     return accountId;
   } catch (error) {
-    console.error("Error fetching channel accounts:", error);
+    await cerr(env, "Error fetching channel accounts:", error);
     return null;
   }
 }
@@ -233,14 +234,14 @@ export async function forwardMessage(
   const accessToken = await getAccessToken(env);
 
   if (!accessToken) {
-    console.error("Cannot forward message: no valid HubSpot access token");
+    await cerr(env, "Cannot forward message: no valid HubSpot access token");
     return false;
   }
 
   const channelAccountId = await getChannelAccountId(env);
 
   if (!channelAccountId) {
-    console.error("Cannot forward message: no channel account ID");
+    await cerr(env, "Cannot forward message: no channel account ID");
     return false;
   }
 
@@ -275,16 +276,13 @@ export async function forwardMessage(
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(
-        `Failed to forward message to HubSpot: ${response.status}`,
-        errorBody
-      );
+      await cerr(env, `Failed to forward message to HubSpot: ${response.status}`, errorBody);
       return false;
     }
 
     return true;
   } catch (error) {
-    console.error("Error forwarding message to HubSpot:", error);
+    await cerr(env, "Error forwarding message to HubSpot:", error);
     return false;
   }
 }

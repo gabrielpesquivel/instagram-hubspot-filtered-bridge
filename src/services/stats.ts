@@ -1,6 +1,35 @@
 import type { Env } from "../types";
 
 const DAILY_TTL = 90 * 24 * 60 * 60; // 90 days in seconds
+const LOG_KEY = "event_log";
+const MAX_LOG_ENTRIES = 50;
+
+export interface LogEntry {
+  timestamp: string;
+  type: "forwarded" | "skipped" | "replied" | "error";
+  message: string;
+}
+
+export async function appendLog(
+  entry: Omit<LogEntry, "timestamp">,
+  env: Env
+): Promise<void> {
+  try {
+    const raw = await env.PROFILE_CACHE.get(LOG_KEY);
+    const entries: LogEntry[] = raw ? JSON.parse(raw) : [];
+    entries.push({ ...entry, timestamp: new Date().toISOString() });
+    // Keep only the most recent entries
+    const trimmed = entries.slice(-MAX_LOG_ENTRIES);
+    await env.PROFILE_CACHE.put(LOG_KEY, JSON.stringify(trimmed));
+  } catch {
+    // Don't let logging failures break the pipeline
+  }
+}
+
+export async function getRecentLogs(env: Env): Promise<LogEntry[]> {
+  const raw = await env.PROFILE_CACHE.get(LOG_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
 
 function todayKey(): string {
   return new Date().toISOString().slice(0, 10);

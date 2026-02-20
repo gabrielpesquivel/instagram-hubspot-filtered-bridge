@@ -1,5 +1,6 @@
 import type { Env } from "../types";
-import { getAllStats } from "../services/stats";
+import { getAllStats, getRecentLogs } from "../services/stats";
+import { getConsoleLogs } from "../services/logger";
 
 const SESSION_TTL = 24 * 60 * 60; // 24 hours in seconds
 
@@ -82,6 +83,30 @@ export async function handleStats(
 
   const stats = await getAllStats(env);
   return jsonResponse(stats);
+}
+
+export async function handleLogs(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  const logs = await getRecentLogs(env);
+  return jsonResponse(logs);
+}
+
+export async function handleConsoleLogs(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  const logs = await getConsoleLogs(env);
+  return jsonResponse(logs);
 }
 
 export async function handleHealth(

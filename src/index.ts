@@ -5,12 +5,15 @@ import {
   handleLogin,
   handleLogout,
   handleStats,
+  handleLogs,
+  handleConsoleLogs,
   handleHealth,
 } from "./handlers/dashboard";
 import {
   exchangeCodeForTokens,
   finalizeChannelConnection,
 } from "./services/hubspot-api";
+import { clog, cerr } from "./services/logger";
 
 const HUBSPOT_AUTHORIZE_URL = "https://app.hubspot.com/oauth/authorize";
 const HUBSPOT_SCOPES = [
@@ -36,6 +39,12 @@ export default {
     }
     if (path === "/api/stats" && request.method === "GET") {
       return handleStats(request, env);
+    }
+    if (path === "/api/logs" && request.method === "GET") {
+      return handleLogs(request, env);
+    }
+    if (path === "/api/console-logs" && request.method === "GET") {
+      return handleConsoleLogs(request, env);
     }
     if (path === "/api/health" && request.method === "GET") {
       return handleHealth(request, env);
@@ -108,7 +117,7 @@ export default {
         const channelId = url.searchParams.get("channelId");
         const redirectUrl = url.searchParams.get("redirectUrl");
 
-        console.log("Connect flow params:", {
+        await clog(env, "Connect flow params:", {
           accountToken: accountToken ? "present" : "missing",
           channelId,
           redirectUrl: redirectUrl ? "present" : "missing",
@@ -139,7 +148,7 @@ export default {
           headers: { Location: redirectUrl },
         });
       } catch (error) {
-        console.error("Connect flow error:", error);
+        await cerr(env, "Connect flow error:", error);
         return new Response(
           `Connection error: ${error instanceof Error ? error.message : String(error)}`,
           { status: 500 }
