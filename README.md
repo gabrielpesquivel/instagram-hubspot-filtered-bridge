@@ -145,6 +145,51 @@ Both webhook endpoints enforce signature verification and reject unauthenticated
 - **Instagram webhook** (`POST /webhook/instagram`): Verifies `X-Hub-Signature-256` header using HMAC-SHA256 with the Instagram App Secret.
 - **HubSpot webhook** (`POST /webhook/hubspot`): Verifies `X-HubSpot-Signature-v2` header using SHA-256 of `clientSecret + httpMethod + httpUrl + requestBody`.
 
+## Meta App Review
+
+The use case has been **approved** by Meta. All permissions were rejected solely because the screencast didn't demonstrate the full end-to-end flow. The following features need to be implemented and shown in a re-submitted screencast.
+
+### What needs to be built
+
+| # | Task | Permissions it satisfies |
+|---|------|--------------------------|
+| 1 | **Facebook Login flow in dashboard** — Add a "Connect Instagram Account" button that initiates Facebook Login OAuth, shows the consent screen with all permissions, and stores the resulting token. | All — reviewers must see the Meta Login flow and a user granting permissions |
+| 2 | **Display connected Page/IG account** — After login, show the connected Facebook Page name and Instagram Business account in the dashboard. | `pages_show_list`, `instagram_business_basic`, `pages_read_engagement`, `business_management` |
+| 3 | **"Send Test Message" UI** — Add a section in the dashboard to send a message to an Instagram user and show it delivered in the native app. | `instagram_business_manage_messages`, `pages_messaging`, `instagram_manage_messages` |
+| 4 | **Webhook subscription management** — Show/manage webhook subscriptions from the dashboard. | `pages_manage_metadata` |
+| 5 | **Record end-to-end screencast** — Demonstrate the full flow per Meta's requirements (see below). | All |
+
+### Screencast requirements
+
+The screencast must show:
+
+1. **Complete Meta Login flow** — Open dashboard, click connect, show Facebook Login dialog with all permissions, grant access
+2. **Connected assets visible** — After login, show the connected Facebook Page and Instagram account
+3. **Incoming message flow** — Send a DM from a test Instagram account, show it arriving in the dashboard activity log and in HubSpot inbox
+4. **Outgoing message flow** — Use the "Send Test Message" UI to send a message, then show it appearing in the native Instagram app
+5. **Webhook management** — Show the webhook subscription status
+
+Additional:
+- Use English in all UI
+- Add captions/tooltips explaining each step
+- Note in submission that this is a server-to-server app using system user tokens for the background bridge, but includes Facebook Login for account connection
+- Follow [Meta's Screen Recording Guide](https://developers.facebook.com/docs/app-review/submission-guide/screen-recordings/)
+
+### Permissions requested
+
+| Permission | Purpose |
+|------------|---------|
+| `public_profile` | Approved |
+| `pages_read_engagement` | Read Page engagement data for connected account display |
+| `instagram_business_basic` | Access Instagram Business account info (username, followers) |
+| `instagram_business_manage_messages` | Receive and read Instagram DMs via webhook |
+| `pages_show_list` | List Facebook Pages the user manages |
+| `pages_manage_metadata` | Subscribe Pages to webhook events |
+| `pages_messaging` | Send messages on behalf of a Page |
+| `business_management` | Access Business Manager assets |
+| `instagram_manage_messages` | Send messages via Instagram |
+| `instagram_basic` | Basic Instagram account access |
+
 ## Development
 
 ```bash
