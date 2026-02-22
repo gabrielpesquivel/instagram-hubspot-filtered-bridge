@@ -1,13 +1,21 @@
 import { useState, type FormEvent } from "react";
 
 export function Login({ onLogin }: { onLogin: () => void }) {
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [hint, setHint] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
+
+    if (username.trim().toLowerCase() !== "admin") {
+      setError("Invalid username");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -21,6 +29,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
         onLogin();
       } else {
         setError("Invalid password");
+        setHint("Best OS + meaning of life");
       }
     } catch {
       setError("Connection failed");
@@ -32,16 +41,25 @@ export function Login({ onLogin }: { onLogin: () => void }) {
   return (
     <div style={styles.container}>
       <form onSubmit={handleSubmit} style={styles.form}>
+        <img src="/logo.png" alt="BootInk" style={styles.logo} />
         <h1 style={styles.title}>Bridge Dashboard</h1>
+        <input
+          type="text"
+          placeholder="Username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          style={styles.input}
+          autoFocus
+        />
         <input
           type="password"
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           style={styles.input}
-          autoFocus
         />
         {error && <p style={styles.error}>{error}</p>}
+        {hint && <p style={styles.hint}>Hint: {hint}</p>}
         <button type="submit" disabled={loading} style={styles.button}>
           {loading ? "Logging in..." : "Log in"}
         </button>
@@ -69,7 +87,12 @@ const styles: Record<string, React.CSSProperties> = {
     width: "320px",
     display: "flex",
     flexDirection: "column",
+    alignItems: "center",
     gap: "1rem",
+  },
+  logo: {
+    width: "120px",
+    height: "auto",
   },
   title: {
     margin: 0,
@@ -78,12 +101,15 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#333",
   },
   input: {
+    width: "100%",
     padding: "0.75rem",
     border: "1px solid #ddd",
     borderRadius: "4px",
     fontSize: "1rem",
+    boxSizing: "border-box" as const,
   },
   button: {
+    width: "100%",
     padding: "0.75rem",
     background: "#333",
     color: "#fff",
@@ -96,6 +122,13 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#d32f2f",
     margin: 0,
     fontSize: "0.875rem",
+    textAlign: "center" as const,
+  },
+  hint: {
+    color: "#888",
+    margin: 0,
+    fontSize: "0.8rem",
+    fontStyle: "italic",
     textAlign: "center" as const,
   },
 };

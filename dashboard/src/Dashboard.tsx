@@ -93,14 +93,18 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
   }, []);
 
   return (
-    <div style={styles.page}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>Instagram-HubSpot Filtered Bridge Dashboard</h1>
-        <button onClick={onLogout} style={styles.logoutBtn}>
-          Log out
-        </button>
-      </div>
+    <div style={styles.wrapper}>
+      <header style={styles.topBar}>
+        <div style={styles.topBarInner}>
+          <img src="/logo.png" alt="BootInk" style={styles.topBarLogo} />
+          <span style={styles.topBarTitle}>Instagram-HubSpot Filtered Bridge</span>
+          <button onClick={onLogout} style={styles.logoutBtn}>
+            Log out
+          </button>
+        </div>
+      </header>
 
+      <div style={styles.page}>
       {error && <p style={styles.error}>{error}</p>}
 
       <div style={styles.columns}>
@@ -232,6 +236,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
       </div>
+      </div>
     </div>
   );
 }
@@ -276,13 +281,57 @@ function StatCard({
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: {
-    maxWidth: "1100px",
-    margin: "0 auto",
-    padding: "2rem 1rem",
+  wrapper: {
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     color: "#333",
+    minHeight: "100vh",
+    background: "#f5f5f5",
+  },
+  topBar: {
+    background: "#fff",
+    borderBottom: "1px solid #e0e0e0",
+    padding: "0 1rem",
+    position: "sticky" as const,
+    top: 0,
+    zIndex: 100,
+    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+  },
+  topBarInner: {
+    maxWidth: "1100px",
+    margin: "0 auto",
+    display: "flex",
+    alignItems: "center",
+    position: "relative" as const,
+    height: "56px",
+  },
+  topBarLogo: {
+    height: "32px",
+    width: "auto",
+  },
+  topBarTitle: {
+    position: "absolute" as const,
+    left: "50%",
+    transform: "translateX(-50%)",
+    fontSize: "1.1rem",
+    fontWeight: 600,
+    color: "#222",
+    whiteSpace: "nowrap" as const,
+  },
+  logoutBtn: {
+    marginLeft: "auto",
+    padding: "0.4rem 1rem",
+    background: "none",
+    border: "1px solid #ccc",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "0.8rem",
+    color: "#666",
+  },
+  page: {
+    maxWidth: "1100px",
+    margin: "0 auto",
+    padding: "1.5rem 1rem",
   },
   columns: {
     display: "flex",
@@ -296,24 +345,6 @@ const styles: Record<string, React.CSSProperties> = {
   rightCol: {
     flex: 1,
     minWidth: 0,
-  },
-  header: {
-    position: "relative" as const,
-    textAlign: "center" as const,
-    marginBottom: "1.5rem",
-  },
-  title: { margin: 0, fontSize: "1.5rem", textAlign: "center" as const },
-  logoutBtn: {
-    position: "absolute" as const,
-    right: 0,
-    top: "50%",
-    transform: "translateY(-50%)",
-    padding: "0.5rem 1rem",
-    background: "none",
-    border: "1px solid #ccc",
-    borderRadius: "4px",
-    cursor: "pointer",
-    fontSize: "0.875rem",
   },
   error: { color: "#d32f2f", fontSize: "0.875rem" },
   statusBar: {
