@@ -10,6 +10,19 @@ import {
   handleHealth,
 } from "./handlers/dashboard";
 import {
+  handleFacebookAuthInit,
+  handleFacebookCallback,
+  handleGetConnection,
+  handleDisconnect,
+} from "./handlers/facebook-auth";
+import {
+  handleTestMessage,
+  handleGetWebhooks,
+  handleSubscribeWebhooks,
+  handleGetFilterSettings,
+  handleUpdateFilterSettings,
+} from "./handlers/meta-api";
+import {
   exchangeCodeForTokens,
   finalizeChannelConnection,
 } from "./services/hubspot-api";
@@ -48,6 +61,39 @@ export default {
     }
     if (path === "/api/health" && request.method === "GET") {
       return handleHealth(request, env);
+    }
+
+    // Facebook OAuth
+    if (path === "/auth/facebook" && request.method === "GET") {
+      return handleFacebookAuthInit(request, env);
+    }
+    if (path === "/auth/facebook/callback" && request.method === "GET") {
+      return handleFacebookCallback(request, env);
+    }
+
+    // Meta connection & API
+    if (path === "/api/meta/connection" && request.method === "GET") {
+      return handleGetConnection(request, env);
+    }
+    if (path === "/api/meta/disconnect" && request.method === "POST") {
+      return handleDisconnect(request, env);
+    }
+    if (path === "/api/meta/test-message" && request.method === "POST") {
+      return handleTestMessage(request, env);
+    }
+    if (path === "/api/meta/webhooks" && request.method === "GET") {
+      return handleGetWebhooks(request, env);
+    }
+    if (path === "/api/meta/webhooks" && request.method === "POST") {
+      return handleSubscribeWebhooks(request, env);
+    }
+
+    // Filter settings
+    if (path === "/api/settings/filter" && request.method === "GET") {
+      return handleGetFilterSettings(request, env);
+    }
+    if (path === "/api/settings/filter" && request.method === "POST") {
+      return handleUpdateFilterSettings(request, env);
     }
 
     // Instagram webhook

@@ -71,6 +71,53 @@ export async function verifyHubSpotSignature(
 }
 
 /**
+ * Verify HubSpot webhook signature (v3)
+ * HMAC-SHA256(clientSecret, requestMethod + requestUri + requestBody + timestamp)
+ * Result is base64-encoded
+ */
+export async function verifyHubSpotSignatureV3(
+  httpMethod: string,
+  httpUrl: string,
+  rawBody: string,
+  signature: string | null,
+  timestamp: string | null,
+  clientSecret: string
+): Promise<boolean> {
+  if (!signature || !timestamp) {
+    return false;
+  }
+
+  // Reject if timestamp is older than 5 minutes
+  const ts = parseInt(timestamp, 10);
+  if (Date.now() - ts > 300_000) {
+    return false;
+  }
+
+  const sourceString = httpMethod + httpUrl + rawBody + timestamp;
+
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(clientSecret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  const signatureBuffer = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    encoder.encode(sourceString)
+  );
+
+  const computedHash = btoa(
+    String.fromCharCode(...new Uint8Array(signatureBuffer))
+  );
+
+  return secureCompare(computedHash, signature);
+}
+
+/**
  * Constant-time string comparison to prevent timing attacks
  */
 function secureCompare(a: string, b: string): boolean {

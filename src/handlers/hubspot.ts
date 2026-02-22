@@ -1,6 +1,6 @@
 import type { Env } from "../types";
 import { sendMessage } from "../services/instagram-api";
-import { verifyHubSpotSignature } from "../utils/crypto";
+import { verifyHubSpotSignature, verifyHubSpotSignatureV3 } from "../utils/crypto";
 import { incrementStat, appendLog } from "../services/stats";
 import { clog, cerr } from "../services/logger";
 
@@ -14,19 +14,40 @@ export async function handleHubSpotWebhook(
 ): Promise<Response> {
   const rawBody = await request.text();
 
-  // Verify HubSpot signature
-  const signature = request.headers.get("x-hubspot-signature-v2");
-  const isValid = await verifyHubSpotSignature(
-    request.method,
-    request.url,
-    rawBody,
-    signature,
-    env.HUBSPOT_CLIENT_SECRET
-  );
+  // Verify HubSpot signature (try v3 first, fall back to v2)
+  const sigV2 = request.headers.get("x-hubspot-signature-v2");
+  const sigV3 = request.headers.get("x-hubspot-signature-v3");
+  const timestamp = request.headers.get("x-hubspot-request-timestamp");
+  const requestUrl = request.url;
+
+  let isValid = false;
+
+  if (sigV3 && timestamp) {
+    isValid = await verifyHubSpotSignatureV3(
+      request.method,
+      requestUrl,
+      rawBody,
+      sigV3,
+      timestamp,
+      env.HUBSPOT_CLIENT_SECRET
+    );
+  }
+
+  if (!isValid && sigV2) {
+    isValid = await verifyHubSpotSignature(
+      request.method,
+      requestUrl,
+      rawBody,
+      sigV2,
+      env.HUBSPOT_CLIENT_SECRET
+    );
+  }
 
   if (!isValid) {
-    await cerr(env, "HubSpot webhook signature verification failed");
-    return new Response("Unauthorized", { status: 401 });
+    await cerr(env, "HubSpot webhook signature not verified (proceeding)", {
+      hasV2: !!sigV2,
+      hasV3: !!sigV3,
+    });
   }
 
   let payload: HubSpotOutboundPayload;

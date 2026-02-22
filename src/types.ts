@@ -4,7 +4,9 @@ export interface Env {
   PROFILE_CACHE: KVNamespace;
 
   // Meta/Instagram secrets
+  META_APP_ID: string;
   META_APP_SECRET: string;
+  INSTAGRAM_APP_SECRET: string;
   META_PAGE_ACCESS_TOKEN: string;
   INSTAGRAM_PAGE_ID: string;
   WEBHOOK_VERIFY_TOKEN: string;

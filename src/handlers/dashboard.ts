@@ -1,29 +1,10 @@
 import type { Env } from "../types";
 import { getAllStats, getRecentLogs } from "../services/stats";
 import { getConsoleLogs } from "../services/logger";
+import { getConnection } from "../services/facebook-oauth";
+import { getCookie, isAuthenticated, jsonResponse } from "../utils/auth";
 
 const SESSION_TTL = 24 * 60 * 60; // 24 hours in seconds
-
-function getCookie(request: Request, name: string): string | null {
-  const cookie = request.headers.get("Cookie");
-  if (!cookie) return null;
-  const match = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return match ? match[1] : null;
-}
-
-async function isAuthenticated(request: Request, env: Env): Promise<boolean> {
-  const token = getCookie(request, "session");
-  if (!token) return false;
-  const session = await env.PROFILE_CACHE.get(`session:${token}`);
-  return session === "valid";
-}
-
-function jsonResponse(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
 
 export async function handleLogin(
   request: Request,
@@ -117,9 +98,10 @@ export async function handleHealth(
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
 
-  const [oauthTokens, channelId] = await Promise.all([
+  const [oauthTokens, channelId, metaConnection] = await Promise.all([
     env.PROFILE_CACHE.get("hubspot_oauth_tokens"),
     Promise.resolve(env.HUBSPOT_CUSTOM_CHANNEL_ID),
+    getConnection(env),
   ]);
 
   const hasToken = !!oauthTokens;
@@ -129,5 +111,6 @@ export async function handleHealth(
     pipeline_active: pipelineActive,
     has_hubspot_token: hasToken,
     has_channel_id: !!channelId,
+    has_meta_connection: !!metaConnection,
   });
 }

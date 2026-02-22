@@ -41,7 +41,7 @@ export async function handleWebhook(
   const isValid = await verifyWebhookSignatureBytes(
     rawBodyBytes,
     signature,
-    env.META_APP_SECRET
+    env.INSTAGRAM_APP_SECRET
   );
 
   if (!isValid) {
@@ -99,7 +99,7 @@ async function processMessage(
     const profile = await getUserProfile(senderId, env);
 
     // Apply filter
-    const filterResult = shouldForwardMessage(profile, message, env);
+    const filterResult = await shouldForwardMessage(profile, message, env);
 
     const senderLabel = profile.username ? `@${profile.username}` : senderId;
 

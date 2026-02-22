@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { MetaConnection } from "./MetaConnection";
+import { FilterSettings } from "./FilterSettings";
+import { WebhookSubscriptions } from "./WebhookSubscriptions";
 
 interface Stats {
   forwarded: { total: number; today: number };
@@ -13,6 +16,21 @@ interface Health {
   pipeline_active: boolean;
   has_hubspot_token: boolean;
   has_channel_id: boolean;
+  has_meta_connection: boolean;
+}
+
+interface MetaConnectionData {
+  connected: boolean;
+  facebook_page_name?: string;
+  instagram_username?: string;
+  instagram_profile_picture_url?: string;
+  connected_at?: string;
+  user_token_expires_at?: number;
+}
+
+interface FilterSettingsData {
+  min_followers: number;
+  skip_verified: boolean;
 }
 
 interface LogEntry {
@@ -32,17 +50,24 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [health, setHealth] = useState<Health | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [consoleLogs, setConsoleLogs] = useState<ConsoleLogEntry[]>([]);
+  const [metaConnection, setMetaConnection] =
+    useState<MetaConnectionData | null>(null);
+  const [filterSettings, setFilterSettings] =
+    useState<FilterSettingsData | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [error, setError] = useState("");
 
   async function fetchData() {
     try {
-      const [statsRes, healthRes, logsRes, consoleRes] = await Promise.all([
-        fetch("/api/stats"),
-        fetch("/api/health"),
-        fetch("/api/logs"),
-        fetch("/api/console-logs"),
-      ]);
+      const [statsRes, healthRes, logsRes, consoleRes, connectionRes, filterRes] =
+        await Promise.all([
+          fetch("/api/stats"),
+          fetch("/api/health"),
+          fetch("/api/logs"),
+          fetch("/api/console-logs"),
+          fetch("/api/meta/connection"),
+          fetch("/api/settings/filter"),
+        ]);
 
       if (statsRes.status === 401 || healthRes.status === 401) {
         onLogout();
@@ -53,6 +78,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
       setHealth(await healthRes.json());
       if (logsRes.ok) setLogs(await logsRes.json());
       if (consoleRes.ok) setConsoleLogs(await consoleRes.json());
+      if (connectionRes.ok) setMetaConnection(await connectionRes.json());
+      if (filterRes.ok) setFilterSettings(await filterRes.json());
       setError("");
     } catch {
       setError("Failed to fetch data");
@@ -66,9 +93,9 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
   }, []);
 
   return (
-    <div style={styles.container}>
+    <div style={styles.page}>
       <div style={styles.header}>
-        <h1 style={styles.title}>Bridge Dashboard</h1>
+        <h1 style={styles.title}>Instagram-HubSpot Filtered Bridge Dashboard</h1>
         <button onClick={onLogout} style={styles.logoutBtn}>
           Log out
         </button>
@@ -76,122 +103,134 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
 
       {error && <p style={styles.error}>{error}</p>}
 
-      {health && (
-        <div style={styles.statusBar}>
-          <span
-            style={{
-              ...styles.statusDot,
-              background: health.pipeline_active ? "#4caf50" : "#f44336",
-            }}
-          />
-          <span>
-            Pipeline {health.pipeline_active ? "Active" : "Inactive"}
-          </span>
-          {!health.has_hubspot_token && (
-            <span style={styles.statusDetail}>Missing HubSpot token</span>
-          )}
-          {!health.has_channel_id && (
-            <span style={styles.statusDetail}>Missing channel ID</span>
-          )}
+      <div style={styles.columns}>
+        {/* Left column — connection & config */}
+        <div style={styles.leftCol}>
+          <MetaConnection connection={metaConnection} onRefresh={fetchData} />
+          <WebhookSubscriptions />
+          <FilterSettings settings={filterSettings} onUpdate={fetchData} />
         </div>
-      )}
 
-      {stats && (
-        <div style={styles.grid}>
-          <StatCard
-            label="Forwarded"
-            total={stats.forwarded.total}
-            today={stats.forwarded.today}
-            color="#2196f3"
-          />
-          <StatCard
-            label="Skipped (Verified)"
-            total={stats.skipped_verified.total}
-            today={stats.skipped_verified.today}
-            color="#9c27b0"
-          />
-          <StatCard
-            label="Skipped (Followers)"
-            total={stats.skipped_high_followers.total}
-            today={stats.skipped_high_followers.today}
-            color="#ff9800"
-          />
-          <StatCard
-            label="Skipped (Media)"
-            total={stats.skipped_media.total}
-            today={stats.skipped_media.today}
-            color="#607d8b"
-          />
-          <StatCard
-            label="Replied"
-            total={stats.replied.total}
-            today={stats.replied.today}
-            color="#4caf50"
-          />
-          <StatCard
-            label="Errors"
-            total={stats.errors.total}
-            today={stats.errors.today}
-            color="#f44336"
-          />
-        </div>
-      )}
+        {/* Right column — monitoring */}
+        <div style={styles.rightCol}>
+          {health && (
+            <div style={styles.statusBar}>
+              <span
+                style={{
+                  ...styles.statusDot,
+                  background: health.pipeline_active ? "#4caf50" : "#f44336",
+                }}
+              />
+              <span>
+                Pipeline {health.pipeline_active ? "Active" : "Inactive"}
+              </span>
+              {!health.has_hubspot_token && (
+                <span style={styles.statusDetail}>Missing HubSpot token</span>
+              )}
+              {!health.has_channel_id && (
+                <span style={styles.statusDetail}>Missing channel ID</span>
+              )}
+            </div>
+          )}
 
-      <div style={styles.logSection}>
-        <h2 style={styles.logTitle}>Activity Log</h2>
-        <div style={styles.logContainer}>
-          {logs.length === 0 ? (
-            <div style={styles.logEmpty}>No activity yet</div>
-          ) : (
-            [...logs].reverse().map((entry, i) => (
-              <div key={i} style={styles.logEntry}>
-                <span style={{ ...styles.logBadge, background: logColors[entry.type] }}>
-                  {entry.type}
-                </span>
-                <span style={styles.logMessage}>{entry.message}</span>
-                <span style={styles.logTime}>
-                  {formatTime(entry.timestamp)}
-                </span>
+          {stats && (
+            <div style={styles.grid}>
+              <StatCard
+                label="Forwarded"
+                total={stats.forwarded.total}
+                today={stats.forwarded.today}
+                color="#2196f3"
+              />
+              <StatCard
+                label="Skipped (Verified)"
+                total={stats.skipped_verified.total}
+                today={stats.skipped_verified.today}
+                color="#9c27b0"
+              />
+              <StatCard
+                label="Skipped (Followers)"
+                total={stats.skipped_high_followers.total}
+                today={stats.skipped_high_followers.today}
+                color="#ff9800"
+              />
+              <StatCard
+                label="Skipped (Media)"
+                total={stats.skipped_media.total}
+                today={stats.skipped_media.today}
+                color="#607d8b"
+              />
+              <StatCard
+                label="Replied"
+                total={stats.replied.total}
+                today={stats.replied.today}
+                color="#4caf50"
+              />
+              <StatCard
+                label="Errors"
+                total={stats.errors.total}
+                today={stats.errors.today}
+                color="#f44336"
+              />
+            </div>
+          )}
+
+          <div style={styles.logSection}>
+            <h2 style={styles.logTitle}>Activity Log</h2>
+            <div style={styles.logContainer}>
+              {logs.length === 0 ? (
+                <div style={styles.logEmpty}>No activity yet</div>
+              ) : (
+                [...logs].reverse().map((entry, i) => (
+                  <div key={i} style={styles.logEntry}>
+                    <span style={{ ...styles.logBadge, background: logColors[entry.type] }}>
+                      {entry.type}
+                    </span>
+                    <span style={styles.logMessage}>{entry.message}</span>
+                    <span style={styles.logTime}>
+                      {formatTime(entry.timestamp)}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div style={styles.consoleSection}>
+            <button
+              onClick={() => setConsoleOpen(!consoleOpen)}
+              style={styles.consoleToggle}
+            >
+              <span style={styles.consoleToggleIcon}>{consoleOpen ? "\u25BC" : "\u25B6"}</span>
+              Console Logs
+              <span style={styles.consoleCount}>{consoleLogs.length}</span>
+            </button>
+            {consoleOpen && (
+              <div style={styles.consoleContainer}>
+                {consoleLogs.length === 0 ? (
+                  <div style={styles.consoleEmpty}>No console output</div>
+                ) : (
+                  [...consoleLogs].reverse().map((entry, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        ...styles.consoleLine,
+                        color: entry.level === "error" ? "#f44336" : "#b5cea8",
+                      }}
+                    >
+                      <span style={styles.consoleTime}>
+                        {new Date(entry.timestamp).toLocaleTimeString()}
+                      </span>
+                      <span style={styles.consoleLevel}>
+                        {entry.level === "error" ? "ERR" : "LOG"}
+                      </span>
+                      <span style={styles.consoleText}>{entry.message}</span>
+                    </div>
+                  ))
+                )}
               </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      <div style={styles.consoleSection}>
-        <button
-          onClick={() => setConsoleOpen(!consoleOpen)}
-          style={styles.consoleToggle}
-        >
-          <span style={styles.consoleToggleIcon}>{consoleOpen ? "\u25BC" : "\u25B6"}</span>
-          Console Logs
-          <span style={styles.consoleCount}>{consoleLogs.length}</span>
-        </button>
-        {consoleOpen && (
-          <div style={styles.consoleContainer}>
-            {consoleLogs.length === 0 ? (
-              <div style={styles.consoleEmpty}>No console output</div>
-            ) : (
-              [...consoleLogs].reverse().map((entry, i) => (
-                <div
-                  key={i}
-                  style={{
-                    ...styles.consoleLine,
-                    color: entry.level === "error" ? "#f44336" : "#b5cea8",
-                  }}
-                >
-                  <span style={styles.consoleTime}>
-                    {new Date(entry.timestamp).toLocaleTimeString()}
-                  </span>
-                  <span style={styles.consoleLevel}>
-                    {entry.level === "error" ? "ERR" : "LOG"}
-                  </span>
-                  <span style={styles.consoleText}>{entry.message}</span>
-                </div>
-              ))
             )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
@@ -237,22 +276,38 @@ function StatCard({
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: {
-    maxWidth: "800px",
+  page: {
+    maxWidth: "1100px",
     margin: "0 auto",
     padding: "2rem 1rem",
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     color: "#333",
   },
-  header: {
+  columns: {
     display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    gap: "1.5rem",
+    alignItems: "flex-start",
+  },
+  leftCol: {
+    width: "280px",
+    flexShrink: 0,
+  },
+  rightCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  header: {
+    position: "relative" as const,
+    textAlign: "center" as const,
     marginBottom: "1.5rem",
   },
-  title: { margin: 0, fontSize: "1.5rem" },
+  title: { margin: 0, fontSize: "1.5rem", textAlign: "center" as const },
   logoutBtn: {
+    position: "absolute" as const,
+    right: 0,
+    top: "50%",
+    transform: "translateY(-50%)",
     padding: "0.5rem 1rem",
     background: "none",
     border: "1px solid #ccc",

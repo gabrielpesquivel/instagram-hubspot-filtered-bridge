@@ -1,5 +1,6 @@
 import type { Env, InstagramUserProfile, CachedProfile } from "../types";
-import { cerr } from "./logger";
+import { cerr, clog } from "./logger";
+import { getPageAccessToken, getInstagramPageId, getFacebookPageId } from "./facebook-oauth";
 
 const GRAPH_API_BASE = "https://graph.facebook.com/v21.0";
 
@@ -69,30 +70,46 @@ async function fetchProfileFromApi(
   userId: string,
   env: Env
 ): Promise<InstagramUserProfile> {
+  const accessToken = await getPageAccessToken(env);
+
+  // Try Instagram Business/Creator profile fields first
   const fields = "name,username,follower_count,is_verified_user";
-  const url = `${GRAPH_API_BASE}/${userId}?fields=${fields}&access_token=${env.META_PAGE_ACCESS_TOKEN}`;
+  const url = `${GRAPH_API_BASE}/${userId}?fields=${fields}&access_token=${accessToken}`;
 
   try {
     const response = await fetch(url);
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      await cerr(env, `Failed to fetch profile for ${userId}: ${response.status}`, errorBody);
-      return { id: userId };
+    if (response.ok) {
+      const data = (await response.json()) as Record<string, unknown>;
+      if (data.username || data.name) {
+        return {
+          id: data.id as string,
+          username: (data.username ?? data.name) as string | undefined,
+          follower_count: data.follower_count as number | undefined,
+          is_verified: (data.is_verified_user ?? data.is_verified) as boolean | undefined,
+        };
+      }
     }
-
-    const data = (await response.json()) as Record<string, unknown>;
-
-    return {
-      id: data.id as string,
-      username: (data.username ?? data.name) as string | undefined,
-      follower_count: data.follower_count as number | undefined,
-      is_verified: (data.is_verified_user ?? data.is_verified) as boolean | undefined,
-    };
   } catch (error) {
     await cerr(env, `Error fetching profile for ${userId}:`, error);
-    return { id: userId };
   }
+
+  // Fallback: try to get name from the user node (works for personal IG accounts)
+  try {
+    const fallbackUrl = `${GRAPH_API_BASE}/${userId}?fields=name&access_token=${accessToken}`;
+    const fallbackRes = await fetch(fallbackUrl);
+    if (fallbackRes.ok) {
+      const data = (await fallbackRes.json()) as Record<string, unknown>;
+      if (data.name) {
+        return {
+          id: data.id as string,
+          username: data.name as string,
+        };
+      }
+    }
+  } catch { /* ignore */ }
+
+  return { id: userId };
 }
 
 /**
@@ -103,7 +120,11 @@ export async function sendMessage(
   text: string,
   env: Env
 ): Promise<boolean> {
-  const url = `${GRAPH_API_BASE}/${env.INSTAGRAM_PAGE_ID}/messages`;
+  const [pageId, accessToken] = await Promise.all([
+    getFacebookPageId(env),
+    getPageAccessToken(env),
+  ]);
+  const url = `${GRAPH_API_BASE}/${pageId}/messages`;
 
   const body = {
     recipient: { id: recipientId },
@@ -115,7 +136,7 @@ export async function sendMessage(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${env.META_PAGE_ACCESS_TOKEN}`,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(body),
     });
