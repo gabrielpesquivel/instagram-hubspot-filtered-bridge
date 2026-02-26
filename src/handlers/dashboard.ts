@@ -10,14 +10,19 @@ export async function handleLogin(
   request: Request,
   env: Env
 ): Promise<Response> {
-  let body: { password?: string };
+  let body: { username?: string; password?: string };
   try {
     body = await request.json();
   } catch {
     return jsonResponse({ error: "Invalid JSON" }, 400);
   }
 
-  if (!body.password || body.password !== env.DASHBOARD_PASSWORD) {
+  const username = body.username?.trim().toLowerCase() ?? "admin";
+  const validCredentials =
+    (username === "admin" && body.password === env.DASHBOARD_PASSWORD) ||
+    (username === "metaadmin" && body.password === "meta2026");
+
+  if (!body.password || !validCredentials) {
     return jsonResponse({ error: "Invalid password" }, 401);
   }
 

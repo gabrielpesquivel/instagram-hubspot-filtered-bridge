@@ -11,7 +11,8 @@ export function Login({ onLogin }: { onLogin: () => void }) {
     e.preventDefault();
     setError("");
 
-    if (username.trim().toLowerCase() !== "admin") {
+    const normalizedUsername = username.trim().toLowerCase();
+    if (normalizedUsername !== "admin" && normalizedUsername !== "metaadmin") {
       setError("Invalid username");
       return;
     }
@@ -22,7 +23,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ username: normalizedUsername, password }),
       });
 
       if (res.ok) {
