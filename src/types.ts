@@ -47,6 +47,7 @@ export interface InstagramMessaging {
 export interface InstagramMessage {
   mid: string;
   text?: string;
+  is_echo?: boolean;
   attachments?: InstagramAttachment[];
 }
 

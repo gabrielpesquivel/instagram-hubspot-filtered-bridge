@@ -1,6 +1,7 @@
 import type { Env, InstagramWebhookPayload, InstagramMessaging } from "../types";
 import { verifyWebhookSignatureBytes } from "../utils/crypto";
 import { getUserProfile } from "../services/instagram-api";
+import { getInstagramPageId } from "../services/facebook-oauth";
 import { forwardMessage } from "../services/hubspot-api";
 import { shouldForwardMessage } from "../services/filter";
 import { incrementStat, appendLog } from "../services/stats";
@@ -93,6 +94,29 @@ async function processMessage(
   }
 
   const senderId = sender.id;
+
+  // Detect echo messages (sent BY the business account, not from a customer)
+  if (message.is_echo) {
+    await clog(env, `Echo message detected (sent by business account to ${messaging.recipient.id})`);
+    await incrementStat("replied", env);
+    await appendLog({
+      type: "replied",
+      message: `Sent to ${messaging.recipient.id} — "${(message.text || "").slice(0, 80)}"`,
+    }, env);
+    return;
+  }
+
+  // Also check sender ID against our own page ID as a fallback
+  const ownPageId = await getInstagramPageId(env);
+  if (senderId === ownPageId) {
+    await clog(env, `Outgoing message detected from own page ID ${senderId}`);
+    await incrementStat("replied", env);
+    await appendLog({
+      type: "replied",
+      message: `Sent to ${messaging.recipient.id} — "${(message.text || "").slice(0, 80)}"`,
+    }, env);
+    return;
+  }
 
   try {
     // Fetch sender profile
