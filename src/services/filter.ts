@@ -1,4 +1,5 @@
 import type { Env, InstagramUserProfile, InstagramMessage, FilterResult } from "../types";
+import { clog } from "./logger";
 
 const KV_KEY = "filter_settings";
 
@@ -43,6 +44,8 @@ export async function shouldForwardMessage(
   }
 
   const settings = await getFilterSettings(env);
+
+  await clog(env, `Filter check for ${profile.username ?? profile.id}: is_verified=${profile.is_verified} (type: ${typeof profile.is_verified}), follower_count=${profile.follower_count}, skip_verified=${settings.skip_verified}, min_followers=${settings.min_followers}`);
 
   // Check if verified
   if (settings.skip_verified && profile.is_verified === true) {

@@ -81,20 +81,41 @@ async function fetchProfileFromApi(
 
     if (response.ok) {
       const data = (await response.json()) as Record<string, unknown>;
+
+      await clog(env, `Graph API profile response for ${userId}:`, {
+        fields_returned: Object.keys(data),
+        has_is_verified_user: "is_verified_user" in data,
+        is_verified_user_value: data.is_verified_user,
+        has_follower_count: "follower_count" in data,
+        follower_count_value: data.follower_count,
+      });
+
       if (data.username || data.name) {
+        const isVerified = (data.is_verified_user ?? data.is_verified) as boolean | undefined;
+
+        if (isVerified === undefined) {
+          await cerr(env, `WARNING: is_verified_user not returned by Graph API for ${userId}. Verified filter will not work for this user. Check App Review / Advanced Access for instagram_manage_messages.`);
+        }
+
         return {
           id: data.id as string,
           username: (data.username ?? data.name) as string | undefined,
           follower_count: data.follower_count as number | undefined,
-          is_verified: (data.is_verified_user ?? data.is_verified) as boolean | undefined,
+          is_verified: isVerified,
         };
       }
+
+      await cerr(env, `Graph API returned OK but no username/name for ${userId}. Response keys: ${Object.keys(data).join(", ")}`);
+    } else {
+      const errorBody = await response.text();
+      await cerr(env, `Graph API profile fetch failed for ${userId}: HTTP ${response.status}`, errorBody);
     }
   } catch (error) {
     await cerr(env, `Error fetching profile for ${userId}:`, error);
   }
 
   // Fallback: try to get name from the user node (works for personal IG accounts)
+  await clog(env, `Falling back to name-only fetch for ${userId} (is_verified and follower_count will be unavailable)`);
   try {
     const fallbackUrl = `${GRAPH_API_BASE}/${userId}?fields=name&access_token=${accessToken}`;
     const fallbackRes = await fetch(fallbackUrl);
@@ -106,9 +127,15 @@ async function fetchProfileFromApi(
           username: data.name as string,
         };
       }
+    } else {
+      const errorBody = await fallbackRes.text();
+      await cerr(env, `Fallback profile fetch also failed for ${userId}: HTTP ${fallbackRes.status}`, errorBody);
     }
-  } catch { /* ignore */ }
+  } catch (error) {
+    await cerr(env, `Fallback profile fetch error for ${userId}:`, error);
+  }
 
+  await cerr(env, `All profile fetch attempts failed for ${userId}, returning bare ID`);
   return { id: userId };
 }
 
