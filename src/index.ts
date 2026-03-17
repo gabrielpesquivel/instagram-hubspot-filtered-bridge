@@ -44,7 +44,7 @@ const HUBSPOT_SCOPES = [
 ];
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -129,7 +129,7 @@ export default {
 
       if (request.method === "POST") {
         // Incoming message
-        return handleWebhook(request, env);
+        return handleWebhook(request, env, ctx);
       }
     }
 

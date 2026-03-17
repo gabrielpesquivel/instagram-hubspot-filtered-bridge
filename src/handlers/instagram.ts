@@ -32,7 +32,8 @@ export async function handleVerification(
  */
 export async function handleWebhook(
   request: Request,
-  env: Env
+  env: Env,
+  ctx: ExecutionContext
 ): Promise<Response> {
   // Get raw body as bytes for signature verification
   const rawBodyBuffer = await request.arrayBuffer();
@@ -70,7 +71,7 @@ export async function handleWebhook(
       continue;
     }
     for (const messaging of entry.messaging) {
-      await processMessage(messaging, env);
+      await processMessage(messaging, env, ctx);
     }
   }
 
@@ -78,9 +79,12 @@ export async function handleWebhook(
   return new Response("OK", { status: 200 });
 }
 
+const FORWARD_DELAY_MS = 30_000; // 30s delay so AI responses feel more natural
+
 async function processMessage(
   messaging: InstagramMessaging,
-  env: Env
+  env: Env,
+  ctx: ExecutionContext
 ): Promise<void> {
   const { sender, message } = messaging;
 
@@ -152,29 +156,33 @@ async function processMessage(
     const hasMedia = !!(message.attachments && message.attachments.length > 0);
     const messageText = message.text || (hasMedia ? "[media]" : "");
 
-    // Allowlisted senders get auto-forwarded directly
+    // Allowlisted senders get auto-forwarded after a delay so responses feel natural
     if (filterResult.reason === "allowlisted") {
       const conversationId = `ig_${senderId}`;
-      const success = await forwardMessage(
-        senderId,
-        profile.username || senderId,
-        conversationId,
-        messageText,
-        env
+      ctx.waitUntil(
+        new Promise<void>((resolve) => setTimeout(resolve, FORWARD_DELAY_MS)).then(async () => {
+          const success = await forwardMessage(
+            senderId,
+            profile.username || senderId,
+            conversationId,
+            messageText,
+            env
+          );
+          if (success) {
+            await incrementStat("forwarded", env);
+            await appendLog({
+              type: "forwarded",
+              message: `${senderLabel} — "${messageText.slice(0, 80)}" (allowlisted, delayed)`,
+            }, env);
+          } else {
+            await incrementStat("errors", env);
+            await appendLog({
+              type: "error",
+              message: `Failed to auto-forward from allowlisted ${senderLabel}`,
+            }, env);
+          }
+        })
       );
-      if (success) {
-        await incrementStat("forwarded", env);
-        await appendLog({
-          type: "forwarded",
-          message: `${senderLabel} — "${messageText.slice(0, 80)}" (allowlisted)`,
-        }, env);
-      } else {
-        await incrementStat("errors", env);
-        await appendLog({
-          type: "error",
-          message: `Failed to auto-forward from allowlisted ${senderLabel}`,
-        }, env);
-      }
       return;
     }
 
