@@ -1,8 +1,12 @@
 import type { Env } from "../types";
-import { getAllStats, getRecentLogs } from "../services/stats";
+import { getAllStats, getRecentLogs, incrementStat, appendLog } from "../services/stats";
 import { getConsoleLogs } from "../services/logger";
 import { getConnection } from "../services/facebook-oauth";
 import { getCookie, isAuthenticated, jsonResponse } from "../utils/auth";
+import { getPendingMessages, removePendingMessage, removePendingBySender } from "../services/pending";
+import { getBlocklist, addToBlocklist, removeFromBlocklist } from "../services/blocklist";
+import { addToAllowlist } from "../services/allowlist";
+import { forwardMessage } from "../services/hubspot-api";
 
 const SESSION_TTL = 24 * 60 * 60; // 24 hours in seconds
 
@@ -118,4 +122,154 @@ export async function handleHealth(
     has_channel_id: !!channelId,
     has_meta_connection: !!metaConnection,
   });
+}
+
+export async function handleGetPending(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+  const messages = await getPendingMessages(env);
+  return jsonResponse(messages);
+}
+
+export async function handleApprovePending(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  let body: { id?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON" }, 400);
+  }
+
+  if (!body.id) {
+    return jsonResponse({ error: "Missing id" }, 400);
+  }
+
+  const removed = await removePendingMessage(body.id, env);
+  if (!removed) {
+    return jsonResponse({ error: "Message not found" }, 404);
+  }
+
+  // Add sender to allowlist so future messages auto-forward
+  await addToAllowlist({
+    senderId: removed.senderId,
+    username: removed.senderUsername,
+  }, env);
+
+  // Collect this message + all other pending messages from same sender
+  const otherPending = await removePendingBySender(removed.senderId, env);
+  const allMessages = [removed, ...otherPending];
+
+  const senderLabel = removed.senderUsername.startsWith("@")
+    ? removed.senderUsername
+    : `@${removed.senderUsername}`;
+  const conversationId = `ig_${removed.senderId}`;
+  let errorCount = 0;
+
+  for (const msg of allMessages) {
+    const success = await forwardMessage(
+      msg.senderId,
+      msg.senderUsername,
+      conversationId,
+      msg.messageText,
+      env
+    );
+    if (success) {
+      await incrementStat("forwarded", env);
+      await appendLog({
+        type: "forwarded",
+        message: `${senderLabel} — "${msg.messageText.slice(0, 80)}"`,
+      }, env);
+    } else {
+      errorCount++;
+      await incrementStat("errors", env);
+      await appendLog({
+        type: "error",
+        message: `Failed to forward approved message from ${senderLabel}`,
+      }, env);
+    }
+  }
+
+  if (errorCount > 0) {
+    return jsonResponse({ error: `Failed to forward ${errorCount}/${allMessages.length} messages` }, 500);
+  }
+  return jsonResponse({ ok: true, forwarded: allMessages.length });
+}
+
+export async function handleRejectPending(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  let body: { id?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON" }, 400);
+  }
+
+  if (!body.id) {
+    return jsonResponse({ error: "Missing id" }, 400);
+  }
+
+  const removed = await removePendingMessage(body.id, env);
+  if (!removed) {
+    return jsonResponse({ error: "Message not found" }, 404);
+  }
+
+  // Remove all other pending messages from same sender
+  const otherRemoved = await removePendingBySender(removed.senderId, env);
+
+  await addToBlocklist({
+    senderId: removed.senderId,
+    username: removed.senderUsername,
+  }, env);
+
+  return jsonResponse({ ok: true, removed: 1 + otherRemoved.length });
+}
+
+export async function handleGetBlocklist(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+  const list = await getBlocklist(env);
+  return jsonResponse(list);
+}
+
+export async function handleUnblock(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  let body: { senderId?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON" }, 400);
+  }
+
+  if (!body.senderId) {
+    return jsonResponse({ error: "Missing senderId" }, 400);
+  }
+
+  await removeFromBlocklist(body.senderId, env);
+  return jsonResponse({ ok: true });
 }

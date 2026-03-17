@@ -75,7 +75,7 @@ export interface CachedProfile {
 // Filter decision
 export interface FilterResult {
   shouldForward: boolean;
-  reason: "verified" | "high_followers" | "media_message" | "forward";
+  reason: "verified" | "high_followers" | "blocklisted" | "allowlisted" | "forward";
 }
 
 // HubSpot Custom Channel Message

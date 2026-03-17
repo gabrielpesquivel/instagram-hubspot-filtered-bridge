@@ -1,4 +1,6 @@
-import type { Env, InstagramUserProfile, InstagramMessage, FilterResult } from "../types";
+import type { Env, InstagramUserProfile, FilterResult } from "../types";
+import { isBlocklisted } from "./blocklist";
+import { isAllowlisted } from "./allowlist";
 import { clog } from "./logger";
 
 const KV_KEY = "filter_settings";
@@ -31,16 +33,21 @@ export async function saveFilterSettings(
 }
 
 /**
- * Determine if a message should be forwarded to HubSpot
+ * Determine if a message should be forwarded to HubSpot.
+ * Returns shouldForward: true for messages that go to the pending queue.
  */
 export async function shouldForwardMessage(
   profile: InstagramUserProfile,
-  message: InstagramMessage,
   env: Env
 ): Promise<FilterResult> {
-  // Check for media attachments first
-  if (hasMediaAttachment(message)) {
-    return { shouldForward: false, reason: "media_message" };
+  // Check blocklist first
+  if (await isBlocklisted(profile.id, env)) {
+    return { shouldForward: false, reason: "blocklisted" };
+  }
+
+  // Check allowlist — previously approved senders auto-forward
+  if (await isAllowlisted(profile.id, env)) {
+    return { shouldForward: true, reason: "allowlisted" };
   }
 
   const settings = await getFilterSettings(env);
@@ -60,18 +67,6 @@ export async function shouldForwardMessage(
     return { shouldForward: false, reason: "high_followers" };
   }
 
-  // Forward to HubSpot
+  // Goes to pending queue
   return { shouldForward: true, reason: "forward" };
-}
-
-/**
- * Check if message contains media (image, video, audio)
- */
-function hasMediaAttachment(message: InstagramMessage): boolean {
-  if (!message.attachments || message.attachments.length === 0) {
-    return false;
-  }
-
-  const mediaTypes = ["image", "video", "audio"];
-  return message.attachments.some((att) => mediaTypes.includes(att.type));
 }

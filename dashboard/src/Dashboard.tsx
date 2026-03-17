@@ -4,10 +4,11 @@ import { FilterSettings } from "./FilterSettings";
 import { WebhookSubscriptions } from "./WebhookSubscriptions";
 
 interface Stats {
+  pending: { total: number; today: number };
   forwarded: { total: number; today: number };
   skipped_verified: { total: number; today: number };
   skipped_high_followers: { total: number; today: number };
-  skipped_media: { total: number; today: number };
+  skipped_blocklisted: { total: number; today: number };
   replied: { total: number; today: number };
   errors: { total: number; today: number };
 }
@@ -35,7 +36,7 @@ interface FilterSettingsData {
 
 interface LogEntry {
   timestamp: string;
-  type: "forwarded" | "skipped" | "replied" | "error";
+  type: "forwarded" | "skipped" | "replied" | "error" | "pending";
   message: string;
 }
 
@@ -44,6 +45,25 @@ interface ConsoleLogEntry {
   level: "log" | "error";
   message: string;
 }
+
+interface PendingMessage {
+  id: string;
+  senderId: string;
+  senderUsername: string;
+  followerCount?: number;
+  isVerified?: boolean;
+  messageText: string;
+  hasMedia: boolean;
+  timestamp: string;
+}
+
+interface BlocklistEntry {
+  senderId: string;
+  username: string;
+  blockedAt: string;
+}
+
+type LogTab = "pending" | "skipped" | "forwarded";
 
 export function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -54,12 +74,15 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     useState<MetaConnectionData | null>(null);
   const [filterSettings, setFilterSettings] =
     useState<FilterSettingsData | null>(null);
+  const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
+  const [blocklist, setBlocklist] = useState<BlocklistEntry[]>([]);
+  const [activeTab, setActiveTab] = useState<LogTab>("pending");
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [error, setError] = useState("");
 
   async function fetchData() {
     try {
-      const [statsRes, healthRes, logsRes, consoleRes, connectionRes, filterRes] =
+      const [statsRes, healthRes, logsRes, consoleRes, connectionRes, filterRes, pendingRes, blocklistRes] =
         await Promise.all([
           fetch("/api/stats"),
           fetch("/api/health"),
@@ -67,6 +90,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
           fetch("/api/console-logs"),
           fetch("/api/meta/connection"),
           fetch("/api/settings/filter"),
+          fetch("/api/pending"),
+          fetch("/api/blocklist"),
         ]);
 
       if (statsRes.status === 401 || healthRes.status === 401) {
@@ -80,10 +105,39 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
       if (consoleRes.ok) setConsoleLogs(await consoleRes.json());
       if (connectionRes.ok) setMetaConnection(await connectionRes.json());
       if (filterRes.ok) setFilterSettings(await filterRes.json());
+      if (pendingRes.ok) setPendingMessages(await pendingRes.json());
+      if (blocklistRes.ok) setBlocklist(await blocklistRes.json());
       setError("");
     } catch {
       setError("Failed to fetch data");
     }
+  }
+
+  async function handleApprove(id: string) {
+    await fetch("/api/pending/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    fetchData();
+  }
+
+  async function handleReject(id: string) {
+    await fetch("/api/pending/reject", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    fetchData();
+  }
+
+  async function handleUnblock(senderId: string) {
+    await fetch("/api/blocklist/unblock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ senderId }),
+    });
+    fetchData();
   }
 
   useEffect(() => {
@@ -91,6 +145,15 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     const interval = setInterval(fetchData, 30_000);
     return () => clearInterval(interval);
   }, []);
+
+  const skippedLogs = logs.filter((l) => l.type === "skipped");
+  const forwardedLogs = logs.filter((l) => l.type === "forwarded" || l.type === "replied");
+  const totalSkipped = stats
+    ? stats.skipped_verified.total + stats.skipped_high_followers.total + stats.skipped_blocklisted.total
+    : 0;
+  const todaySkipped = stats
+    ? stats.skipped_verified.today + stats.skipped_high_followers.today + stats.skipped_blocklisted.today
+    : 0;
 
   return (
     <div style={styles.wrapper}>
@@ -108,11 +171,33 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
       {error && <p style={styles.error}>{error}</p>}
 
       <div style={styles.columns}>
-        {/* Left column — connection & config */}
+        {/* Left column — connection, config & blocklist */}
         <div style={styles.leftCol}>
           <MetaConnection connection={metaConnection} onRefresh={fetchData} />
           <WebhookSubscriptions />
           <FilterSettings settings={filterSettings} onUpdate={fetchData} />
+
+          {/* Blocklist section */}
+          <div style={styles.blocklistSection}>
+            <h3 style={styles.blocklistTitle}>Blocked Senders ({blocklist.length})</h3>
+            <div style={styles.blocklistContainer}>
+              {blocklist.length === 0 ? (
+                <div style={styles.blocklistEmpty}>No blocked senders</div>
+              ) : (
+                blocklist.map((entry) => (
+                  <div key={entry.senderId} style={styles.blocklistEntry}>
+                    <span style={styles.blocklistUser}>@{entry.username}</span>
+                    <button
+                      onClick={() => handleUnblock(entry.senderId)}
+                      style={styles.unblockBtn}
+                    >
+                      Unblock
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Right column — monitoring */}
@@ -140,27 +225,27 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
           {stats && (
             <div style={styles.grid}>
               <StatCard
+                label="Pending"
+                total={pendingMessages.length}
+                today={stats.pending.today}
+                color="#ff9800"
+              />
+              <StatCard
                 label="Forwarded"
                 total={stats.forwarded.total}
                 today={stats.forwarded.today}
                 color="#2196f3"
               />
               <StatCard
-                label="Skipped (Verified)"
-                total={stats.skipped_verified.total}
-                today={stats.skipped_verified.today}
+                label="Skipped"
+                total={totalSkipped}
+                today={todaySkipped}
                 color="#9c27b0"
               />
               <StatCard
-                label="Skipped (Followers)"
-                total={stats.skipped_high_followers.total}
-                today={stats.skipped_high_followers.today}
-                color="#ff9800"
-              />
-              <StatCard
-                label="Skipped (Media)"
-                total={stats.skipped_media.total}
-                today={stats.skipped_media.today}
+                label="Blocked"
+                total={blocklist.length}
+                today={0}
                 color="#607d8b"
               />
               <StatCard
@@ -178,23 +263,98 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
             </div>
           )}
 
+          {/* Tabbed log section */}
           <div style={styles.logSection}>
-            <h2 style={styles.logTitle}>Activity Log</h2>
+            <div style={styles.tabBar}>
+              {(["pending", "skipped", "forwarded"] as LogTab[]).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  style={{
+                    ...styles.tab,
+                    ...(activeTab === tab ? styles.tabActive : {}),
+                  }}
+                >
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  {tab === "pending" && pendingMessages.length > 0 && (
+                    <span style={styles.tabBadge}>{pendingMessages.length}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
             <div style={styles.logContainer}>
-              {logs.length === 0 ? (
-                <div style={styles.logEmpty}>No activity yet</div>
-              ) : (
-                [...logs].reverse().map((entry, i) => (
-                  <div key={i} style={styles.logEntry}>
-                    <span style={{ ...styles.logBadge, background: logColors[entry.type] }}>
-                      {entry.type}
-                    </span>
-                    <span style={styles.logMessage}>{entry.message}</span>
-                    <span style={styles.logTime}>
-                      {formatTime(entry.timestamp)}
-                    </span>
-                  </div>
-                ))
+              {activeTab === "pending" && (
+                pendingMessages.length === 0 ? (
+                  <div style={styles.logEmpty}>No pending messages</div>
+                ) : (
+                  [...pendingMessages].reverse().map((msg) => (
+                    <div key={msg.id} style={styles.pendingEntry}>
+                      <div style={styles.pendingTop}>
+                        <span style={styles.pendingUser}>@{msg.senderUsername}</span>
+                        {msg.followerCount != null && (
+                          <span style={styles.pendingMeta}>
+                            {msg.followerCount.toLocaleString()} followers
+                          </span>
+                        )}
+                        <span style={styles.logTime}>{formatTime(msg.timestamp)}</span>
+                      </div>
+                      <div style={styles.pendingText}>
+                        {msg.messageText || (msg.hasMedia ? "[media]" : "")}
+                      </div>
+                      <div style={styles.pendingActions}>
+                        <button
+                          onClick={() => handleApprove(msg.id)}
+                          style={styles.approveBtn}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleReject(msg.id)}
+                          style={styles.rejectBtn}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )
+              )}
+
+              {activeTab === "skipped" && (
+                skippedLogs.length === 0 ? (
+                  <div style={styles.logEmpty}>No skipped messages</div>
+                ) : (
+                  [...skippedLogs].reverse().map((entry, i) => (
+                    <div key={i} style={styles.logEntry}>
+                      <span style={{ ...styles.logBadge, background: "#9c27b0" }}>
+                        skipped
+                      </span>
+                      <span style={styles.logMessage}>{entry.message}</span>
+                      <span style={styles.logTime}>
+                        {formatTime(entry.timestamp)}
+                      </span>
+                    </div>
+                  ))
+                )
+              )}
+
+              {activeTab === "forwarded" && (
+                forwardedLogs.length === 0 ? (
+                  <div style={styles.logEmpty}>No forwarded messages</div>
+                ) : (
+                  [...forwardedLogs].reverse().map((entry, i) => (
+                    <div key={i} style={styles.logEntry}>
+                      <span style={{ ...styles.logBadge, background: logColors[entry.type] }}>
+                        {entry.type}
+                      </span>
+                      <span style={styles.logMessage}>{entry.message}</span>
+                      <span style={styles.logTime}>
+                        {formatTime(entry.timestamp)}
+                      </span>
+                    </div>
+                  ))
+                )
               )}
             </div>
           </div>
@@ -243,9 +403,10 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
 
 const logColors: Record<string, string> = {
   forwarded: "#2196f3",
-  skipped: "#ff9800",
+  skipped: "#9c27b0",
   replied: "#4caf50",
   error: "#f44336",
+  pending: "#ff9800",
 };
 
 function formatTime(iso: string): string {
@@ -372,7 +533,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
     gap: "1rem",
   },
   card: {
@@ -385,12 +546,44 @@ const styles: Record<string, React.CSSProperties> = {
   cardTotal: { fontSize: "2rem", fontWeight: 700 },
   cardToday: { fontSize: "0.85rem", color: "#999", marginTop: "0.25rem" },
   logSection: { marginTop: "2rem" },
-  logTitle: { fontSize: "1.1rem", fontWeight: 600, marginBottom: "0.75rem" },
+  tabBar: {
+    display: "flex",
+    gap: "0",
+    marginBottom: "0",
+  },
+  tab: {
+    padding: "0.6rem 1.25rem",
+    background: "#e8e8e8",
+    border: "none",
+    borderRadius: "6px 6px 0 0",
+    cursor: "pointer",
+    fontSize: "0.85rem",
+    fontWeight: 600,
+    color: "#666",
+    display: "flex",
+    alignItems: "center",
+    gap: "0.4rem",
+  },
+  tabActive: {
+    background: "#fff",
+    color: "#333",
+    boxShadow: "0 -1px 4px rgba(0,0,0,0.06)",
+  },
+  tabBadge: {
+    background: "#ff9800",
+    color: "#fff",
+    fontSize: "0.65rem",
+    fontWeight: 700,
+    padding: "1px 6px",
+    borderRadius: "10px",
+    minWidth: "18px",
+    textAlign: "center" as const,
+  },
   logContainer: {
     background: "#fff",
-    borderRadius: "6px",
+    borderRadius: "0 6px 6px 6px",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-    maxHeight: "360px",
+    maxHeight: "420px",
     overflowY: "auto" as const,
   },
   logEntry: {
@@ -429,6 +622,99 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center" as const,
     color: "#999",
     fontSize: "0.9rem",
+  },
+  pendingEntry: {
+    padding: "0.75rem 1rem",
+    borderBottom: "1px solid #f0f0f0",
+    fontSize: "0.85rem",
+  },
+  pendingTop: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    marginBottom: "0.35rem",
+  },
+  pendingUser: {
+    fontWeight: 600,
+    color: "#333",
+  },
+  pendingMeta: {
+    fontSize: "0.75rem",
+    color: "#999",
+  },
+  pendingText: {
+    color: "#555",
+    marginBottom: "0.5rem",
+    lineHeight: 1.4,
+    wordBreak: "break-word" as const,
+  },
+  pendingActions: {
+    display: "flex",
+    gap: "0.5rem",
+  },
+  approveBtn: {
+    padding: "0.3rem 0.8rem",
+    background: "#4caf50",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "0.75rem",
+    fontWeight: 600,
+  },
+  rejectBtn: {
+    padding: "0.3rem 0.8rem",
+    background: "#f44336",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "0.75rem",
+    fontWeight: 600,
+  },
+  blocklistSection: {
+    marginTop: "1rem",
+    background: "#fff",
+    borderRadius: "6px",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    padding: "1rem",
+  },
+  blocklistTitle: {
+    fontSize: "0.9rem",
+    fontWeight: 600,
+    margin: 0,
+    marginBottom: "0.5rem",
+  },
+  blocklistContainer: {
+    maxHeight: "200px",
+    overflowY: "auto" as const,
+  },
+  blocklistEmpty: {
+    fontSize: "0.8rem",
+    color: "#999",
+    textAlign: "center" as const,
+    padding: "0.5rem",
+  },
+  blocklistEntry: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "0.35rem 0",
+    borderBottom: "1px solid #f0f0f0",
+    fontSize: "0.8rem",
+  },
+  blocklistUser: {
+    color: "#333",
+    fontWeight: 500,
+  },
+  unblockBtn: {
+    padding: "0.2rem 0.6rem",
+    background: "none",
+    border: "1px solid #ccc",
+    borderRadius: "3px",
+    cursor: "pointer",
+    fontSize: "0.7rem",
+    color: "#666",
   },
   consoleSection: { marginTop: "1.5rem" },
   consoleToggle: {

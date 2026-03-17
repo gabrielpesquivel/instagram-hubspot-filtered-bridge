@@ -8,6 +8,11 @@ import {
   handleLogs,
   handleConsoleLogs,
   handleHealth,
+  handleGetPending,
+  handleApprovePending,
+  handleRejectPending,
+  handleGetBlocklist,
+  handleUnblock,
 } from "./handlers/dashboard";
 import {
   handleFacebookAuthInit,
@@ -61,6 +66,25 @@ export default {
     }
     if (path === "/api/health" && request.method === "GET") {
       return handleHealth(request, env);
+    }
+
+    // Pending queue
+    if (path === "/api/pending" && request.method === "GET") {
+      return handleGetPending(request, env);
+    }
+    if (path === "/api/pending/approve" && request.method === "POST") {
+      return handleApprovePending(request, env);
+    }
+    if (path === "/api/pending/reject" && request.method === "POST") {
+      return handleRejectPending(request, env);
+    }
+
+    // Blocklist
+    if (path === "/api/blocklist" && request.method === "GET") {
+      return handleGetBlocklist(request, env);
+    }
+    if (path === "/api/blocklist/unblock" && request.method === "POST") {
+      return handleUnblock(request, env);
     }
 
     // Facebook OAuth

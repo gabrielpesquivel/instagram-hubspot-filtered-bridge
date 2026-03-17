@@ -2,8 +2,9 @@ import type { Env, InstagramWebhookPayload, InstagramMessaging } from "../types"
 import { verifyWebhookSignatureBytes } from "../utils/crypto";
 import { getUserProfile } from "../services/instagram-api";
 import { getInstagramPageId } from "../services/facebook-oauth";
-import { forwardMessage } from "../services/hubspot-api";
 import { shouldForwardMessage } from "../services/filter";
+import { addPendingMessage } from "../services/pending";
+import { forwardMessage } from "../services/hubspot-api";
 import { incrementStat, appendLog } from "../services/stats";
 import { clog, cerr } from "../services/logger";
 
@@ -123,7 +124,7 @@ async function processMessage(
     const profile = await getUserProfile(senderId, env);
 
     // Apply filter
-    const filterResult = await shouldForwardMessage(profile, message, env);
+    const filterResult = await shouldForwardMessage(profile, env);
 
     const senderLabel = profile.username ? `@${profile.username}` : senderId;
 
@@ -132,12 +133,12 @@ async function processMessage(
       const reasonMap: Record<string, string> = {
         verified: "skipped:verified",
         high_followers: "skipped:high_followers",
-        media_message: "skipped:media",
+        blocklisted: "skipped:blocklisted",
       };
       const reasonLabels: Record<string, string> = {
         verified: "verified account",
         high_followers: `${profile.follower_count?.toLocaleString()} followers`,
-        media_message: "media attachment",
+        blocklisted: "blocklisted",
       };
       const statKey = reasonMap[filterResult.reason];
       if (statKey) await incrementStat(statKey, env);
@@ -148,31 +149,50 @@ async function processMessage(
       return;
     }
 
-    // Forward to HubSpot
-    const conversationId = `ig_${senderId}`;
-    const success = await forwardMessage(
-      senderId,
-      profile.username || "",
-      conversationId,
-      message.text || "",
-      env
-    );
+    const hasMedia = !!(message.attachments && message.attachments.length > 0);
+    const messageText = message.text || (hasMedia ? "[media]" : "");
 
-    if (success) {
-      await clog(env, `Forwarded message from ${senderId} to HubSpot`);
-      await incrementStat("forwarded", env);
-      await appendLog({
-        type: "forwarded",
-        message: `${senderLabel} — "${(message.text || "").slice(0, 80)}"`,
-      }, env);
-    } else {
-      await cerr(env, `Failed to forward message from ${senderId} to HubSpot`);
-      await incrementStat("errors", env);
-      await appendLog({
-        type: "error",
-        message: `Failed to forward message from ${senderLabel}`,
-      }, env);
+    // Allowlisted senders get auto-forwarded directly
+    if (filterResult.reason === "allowlisted") {
+      const conversationId = `ig_${senderId}`;
+      const success = await forwardMessage(
+        senderId,
+        profile.username || senderId,
+        conversationId,
+        messageText,
+        env
+      );
+      if (success) {
+        await incrementStat("forwarded", env);
+        await appendLog({
+          type: "forwarded",
+          message: `${senderLabel} — "${messageText.slice(0, 80)}" (allowlisted)`,
+        }, env);
+      } else {
+        await incrementStat("errors", env);
+        await appendLog({
+          type: "error",
+          message: `Failed to auto-forward from allowlisted ${senderLabel}`,
+        }, env);
+      }
+      return;
     }
+
+    // Add to pending queue for manual approval
+    await addPendingMessage({
+      senderId,
+      senderUsername: profile.username || senderId,
+      followerCount: profile.follower_count,
+      isVerified: profile.is_verified,
+      messageText,
+      hasMedia,
+    }, env);
+    await clog(env, `Added message from ${senderId} to pending queue`);
+    await incrementStat("pending", env);
+    await appendLog({
+      type: "pending",
+      message: `${senderLabel} — "${messageText.slice(0, 80)}"`,
+    }, env);
   } catch (error) {
     await cerr(env, `Error processing message from ${senderId}:`, error);
     await incrementStat("errors", env);

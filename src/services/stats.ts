@@ -6,7 +6,7 @@ const MAX_LOG_ENTRIES = 50;
 
 export interface LogEntry {
   timestamp: string;
-  type: "forwarded" | "skipped" | "replied" | "error";
+  type: "forwarded" | "skipped" | "replied" | "error" | "pending";
   message: string;
 }
 
@@ -54,20 +54,22 @@ export async function incrementStat(key: string, env: Env): Promise<void> {
 }
 
 export interface StatsData {
+  pending: { total: number; today: number };
   forwarded: { total: number; today: number };
   skipped_verified: { total: number; today: number };
   skipped_high_followers: { total: number; today: number };
-  skipped_media: { total: number; today: number };
+  skipped_blocklisted: { total: number; today: number };
   replied: { total: number; today: number };
   errors: { total: number; today: number };
 }
 
 export async function getAllStats(env: Env): Promise<StatsData> {
   const keys = [
+    "pending",
     "forwarded",
     "skipped:verified",
     "skipped:high_followers",
-    "skipped:media",
+    "skipped:blocklisted",
     "replied",
     "errors",
   ];
@@ -84,11 +86,12 @@ export async function getAllStats(env: Env): Promise<StatsData> {
   const parse = (i: number) => parseInt(results[i] || "0", 10);
 
   return {
-    forwarded: { total: parse(0), today: parse(1) },
-    skipped_verified: { total: parse(2), today: parse(3) },
-    skipped_high_followers: { total: parse(4), today: parse(5) },
-    skipped_media: { total: parse(6), today: parse(7) },
-    replied: { total: parse(8), today: parse(9) },
-    errors: { total: parse(10), today: parse(11) },
+    pending: { total: parse(0), today: parse(1) },
+    forwarded: { total: parse(2), today: parse(3) },
+    skipped_verified: { total: parse(4), today: parse(5) },
+    skipped_high_followers: { total: parse(6), today: parse(7) },
+    skipped_blocklisted: { total: parse(8), today: parse(9) },
+    replied: { total: parse(10), today: parse(11) },
+    errors: { total: parse(12), today: parse(13) },
   };
 }
