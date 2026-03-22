@@ -11,6 +11,7 @@ import {
   handleGetPending,
   handleApprovePending,
   handleRejectPending,
+  handleDismissPending,
   handleGetBlocklist,
   handleUnblock,
 } from "./handlers/dashboard";
@@ -77,6 +78,9 @@ export default {
     }
     if (path === "/api/pending/reject" && request.method === "POST") {
       return handleRejectPending(request, env);
+    }
+    if (path === "/api/pending/dismiss" && request.method === "POST") {
+      return handleDismissPending(request, env);
     }
 
     // Blocklist

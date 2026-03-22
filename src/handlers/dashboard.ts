@@ -205,6 +205,33 @@ export async function handleApprovePending(
   return jsonResponse({ ok: true, forwarded: allMessages.length });
 }
 
+export async function handleDismissPending(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  let body: { id?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON" }, 400);
+  }
+
+  if (!body.id) {
+    return jsonResponse({ error: "Missing id" }, 400);
+  }
+
+  const removed = await removePendingMessage(body.id, env);
+  if (!removed) {
+    return jsonResponse({ error: "Message not found" }, 404);
+  }
+
+  return jsonResponse({ ok: true });
+}
+
 export async function handleRejectPending(
   request: Request,
   env: Env

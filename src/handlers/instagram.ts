@@ -127,8 +127,8 @@ async function processMessage(
     // Fetch sender profile
     const profile = await getUserProfile(senderId, env);
 
-    // Apply filter
-    const filterResult = await shouldForwardMessage(profile, env);
+    // Apply filter (pass raw senderId for allowlist/blocklist matching)
+    const filterResult = await shouldForwardMessage(senderId, profile, env);
 
     const senderLabel = profile.username ? `@${profile.username}` : senderId;
 

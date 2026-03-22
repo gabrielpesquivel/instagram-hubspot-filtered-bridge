@@ -35,18 +35,26 @@ export async function saveFilterSettings(
 /**
  * Determine if a message should be forwarded to HubSpot.
  * Returns shouldForward: true for messages that go to the pending queue.
+ *
+ * senderId is the raw webhook sender.id — used for allowlist/blocklist checks
+ * to avoid mismatches if the Graph API returns a different profile.id.
  */
 export async function shouldForwardMessage(
+  senderId: string,
   profile: InstagramUserProfile,
   env: Env
 ): Promise<FilterResult> {
+  await clog(env, `Filter: senderId=${senderId}, profile.id=${profile.id}, username=${profile.username ?? "unknown"}`);
+
   // Check blocklist first
-  if (await isBlocklisted(profile.id, env)) {
+  if (await isBlocklisted(senderId, env)) {
     return { shouldForward: false, reason: "blocklisted" };
   }
 
   // Check allowlist — previously approved senders auto-forward
-  if (await isAllowlisted(profile.id, env)) {
+  const allowed = await isAllowlisted(senderId, env);
+  if (allowed) {
+    await clog(env, `Allowlisted sender ${senderId} — auto-forwarding`);
     return { shouldForward: true, reason: "allowlisted" };
   }
 

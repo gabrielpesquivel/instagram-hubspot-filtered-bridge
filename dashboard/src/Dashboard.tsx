@@ -131,6 +131,15 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     fetchData();
   }
 
+  async function handleDismiss(id: string) {
+    await fetch("/api/pending/dismiss", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    fetchData();
+  }
+
   async function handleUnblock(senderId: string) {
     await fetch("/api/blocklist/unblock", {
       method: "POST",
@@ -314,6 +323,12 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                           style={styles.rejectBtn}
                         >
                           Reject
+                        </button>
+                        <button
+                          onClick={() => handleDismiss(msg.id)}
+                          style={styles.dismissBtn}
+                        >
+                          Dismiss
                         </button>
                       </div>
                     </div>
@@ -667,6 +682,16 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#f44336",
     color: "#fff",
     border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "0.75rem",
+    fontWeight: 600,
+  },
+  dismissBtn: {
+    padding: "0.3rem 0.8rem",
+    background: "none",
+    color: "#999",
+    border: "1px solid #ccc",
     borderRadius: "4px",
     cursor: "pointer",
     fontSize: "0.75rem",
