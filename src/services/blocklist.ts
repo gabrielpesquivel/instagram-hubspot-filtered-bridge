@@ -34,8 +34,13 @@ export async function getBlocklist(env: Env): Promise<BlocklistEntry[]> {
 
 export async function isBlocklisted(
   senderId: string,
-  env: Env
+  env: Env,
+  username?: string
 ): Promise<boolean> {
   const list = await getBlocklist(env);
-  return list.some((e) => e.senderId === senderId);
+  return list.some(
+    (e) =>
+      e.senderId === senderId ||
+      (username && e.username.toLowerCase() === username.toLowerCase())
+  );
 }

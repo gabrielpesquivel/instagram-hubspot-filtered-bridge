@@ -46,8 +46,8 @@ export async function shouldForwardMessage(
 ): Promise<FilterResult> {
   await clog(env, `Filter: senderId=${senderId}, profile.id=${profile.id}, username=${profile.username ?? "unknown"}`);
 
-  // Check blocklist first
-  if (await isBlocklisted(senderId, env)) {
+  // Check blocklist first (match by senderId or username for manual entries)
+  if (await isBlocklisted(senderId, env, profile.username)) {
     return { shouldForward: false, reason: "blocklisted" };
   }
 

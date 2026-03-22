@@ -267,6 +267,34 @@ export async function handleRejectPending(
   return jsonResponse({ ok: true, removed: 1 + otherRemoved.length });
 }
 
+export async function handleAddBlock(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  let body: { username?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON" }, 400);
+  }
+
+  const username = body.username?.trim().replace(/^@/, "");
+  if (!username) {
+    return jsonResponse({ error: "Missing username" }, 400);
+  }
+
+  await addToBlocklist({
+    senderId: `manual:${username}`,
+    username,
+  }, env);
+
+  return jsonResponse({ ok: true });
+}
+
 export async function handleGetBlocklist(
   request: Request,
   env: Env

@@ -76,6 +76,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     useState<FilterSettingsData | null>(null);
   const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
   const [blocklist, setBlocklist] = useState<BlocklistEntry[]>([]);
+  const [blockInput, setBlockInput] = useState("");
   const [activeTab, setActiveTab] = useState<LogTab>("pending");
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [error, setError] = useState("");
@@ -149,6 +150,18 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     fetchData();
   }
 
+  async function handleAddBlock() {
+    const username = blockInput.trim().replace(/^@/, "");
+    if (!username) return;
+    await fetch("/api/blocklist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username }),
+    });
+    setBlockInput("");
+    fetchData();
+  }
+
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 30_000);
@@ -189,6 +202,19 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
           {/* Blocklist section */}
           <div style={styles.blocklistSection}>
             <h3 style={styles.blocklistTitle}>Blocked Senders ({blocklist.length})</h3>
+            <form
+              onSubmit={(e) => { e.preventDefault(); handleAddBlock(); }}
+              style={styles.blocklistForm}
+            >
+              <input
+                type="text"
+                value={blockInput}
+                onChange={(e) => setBlockInput(e.target.value)}
+                placeholder="@username"
+                style={styles.blocklistInput}
+              />
+              <button type="submit" style={styles.blocklistAddBtn}>Block</button>
+            </form>
             <div style={styles.blocklistContainer}>
               {blocklist.length === 0 ? (
                 <div style={styles.blocklistEmpty}>No blocked senders</div>
@@ -709,6 +735,30 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     margin: 0,
     marginBottom: "0.5rem",
+  },
+  blocklistForm: {
+    display: "flex",
+    gap: "0.35rem",
+    marginBottom: "0.5rem",
+  },
+  blocklistInput: {
+    flex: 1,
+    padding: "0.3rem 0.5rem",
+    border: "1px solid #ccc",
+    borderRadius: "4px",
+    fontSize: "0.8rem",
+    outline: "none",
+  },
+  blocklistAddBtn: {
+    padding: "0.3rem 0.6rem",
+    background: "#f44336",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "0.75rem",
+    fontWeight: 600,
+    flexShrink: 0,
   },
   blocklistContainer: {
     maxHeight: "200px",

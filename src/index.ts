@@ -12,6 +12,7 @@ import {
   handleApprovePending,
   handleRejectPending,
   handleDismissPending,
+  handleAddBlock,
   handleGetBlocklist,
   handleUnblock,
 } from "./handlers/dashboard";
@@ -86,6 +87,9 @@ export default {
     // Blocklist
     if (path === "/api/blocklist" && request.method === "GET") {
       return handleGetBlocklist(request, env);
+    }
+    if (path === "/api/blocklist" && request.method === "POST") {
+      return handleAddBlock(request, env);
     }
     if (path === "/api/blocklist/unblock" && request.method === "POST") {
       return handleUnblock(request, env);
