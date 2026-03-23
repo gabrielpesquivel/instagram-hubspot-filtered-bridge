@@ -438,8 +438,21 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
         </div>
       </div>
       </div>
+
+      <div style={styles.buildStamp}>
+        Last updated {formatBuildTime()}
+      </div>
     </div>
   );
+}
+
+declare const __BUILD_TIME__: string;
+
+function formatBuildTime(): string {
+  const d = new Date(__BUILD_TIME__);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) +
+    " at " +
+    d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
 const logColors: Record<string, string> = {
@@ -856,5 +869,12 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center" as const,
     color: "#666",
     fontSize: "0.85rem",
+  },
+  buildStamp: {
+    position: "fixed" as const,
+    bottom: "0.75rem",
+    right: "1rem",
+    fontSize: "0.7rem",
+    color: "#aaa",
   },
 };
