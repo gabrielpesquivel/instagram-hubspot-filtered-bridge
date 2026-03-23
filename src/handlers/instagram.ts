@@ -6,6 +6,7 @@ import { shouldForwardMessage } from "../services/filter";
 import { addPendingMessage } from "../services/pending";
 import { forwardMessage } from "../services/hubspot-api";
 import { incrementStat, appendLog } from "../services/stats";
+import { getOrCreateThreadId } from "../services/thread-session";
 import { clog, cerr } from "../services/logger";
 
 /**
@@ -158,7 +159,7 @@ async function processMessage(
 
     // Allowlisted senders get auto-forwarded after a delay so responses feel natural
     if (filterResult.reason === "allowlisted") {
-      const conversationId = `ig_${senderId}`;
+      const conversationId = await getOrCreateThreadId(senderId, env);
       ctx.waitUntil(
         new Promise<void>((resolve) => setTimeout(resolve, FORWARD_DELAY_MS)).then(async () => {
           const success = await forwardMessage(

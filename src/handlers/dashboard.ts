@@ -7,6 +7,7 @@ import { getPendingMessages, removePendingMessage, removePendingBySender } from 
 import { getBlocklist, addToBlocklist, removeFromBlocklist } from "../services/blocklist";
 import { addToAllowlist } from "../services/allowlist";
 import { forwardMessage } from "../services/hubspot-api";
+import { getOrCreateThreadId } from "../services/thread-session";
 
 const SESSION_TTL = 24 * 60 * 60; // 24 hours in seconds
 
@@ -172,7 +173,7 @@ export async function handleApprovePending(
   const senderLabel = removed.senderUsername.startsWith("@")
     ? removed.senderUsername
     : `@${removed.senderUsername}`;
-  const conversationId = `ig_${removed.senderId}`;
+  const conversationId = await getOrCreateThreadId(removed.senderId, env);
   let errorCount = 0;
 
   for (const msg of allMessages) {
