@@ -1,6 +1,5 @@
 import type { Env, InstagramUserProfile, FilterResult } from "../types";
 import { isBlocklisted } from "./blocklist";
-import { isAllowlisted } from "./allowlist";
 import { clog } from "./logger";
 
 const KV_KEY = "filter_settings";
@@ -36,7 +35,7 @@ export async function saveFilterSettings(
  * Determine if a message should be forwarded to HubSpot.
  * Returns shouldForward: true for messages that go to the pending queue.
  *
- * senderId is the raw webhook sender.id — used for allowlist/blocklist checks
+ * senderId is the raw webhook sender.id — used for blocklist checks
  * to avoid mismatches if the Graph API returns a different profile.id.
  */
 export async function shouldForwardMessage(
@@ -49,13 +48,6 @@ export async function shouldForwardMessage(
   // Check blocklist first (match by senderId or username for manual entries)
   if (await isBlocklisted(senderId, env, profile.username)) {
     return { shouldForward: false, reason: "blocklisted" };
-  }
-
-  // Check allowlist — previously approved senders auto-forward
-  const allowed = await isAllowlisted(senderId, env);
-  if (allowed) {
-    await clog(env, `Allowlisted sender ${senderId} — auto-forwarding`);
-    return { shouldForward: true, reason: "allowlisted" };
   }
 
   const settings = await getFilterSettings(env);

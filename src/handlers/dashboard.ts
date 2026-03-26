@@ -5,7 +5,6 @@ import { getConnection } from "../services/facebook-oauth";
 import { getCookie, isAuthenticated, jsonResponse } from "../utils/auth";
 import { getPendingMessages, removePendingMessage, removePendingBySender } from "../services/pending";
 import { getBlocklist, addToBlocklist, removeFromBlocklist } from "../services/blocklist";
-import { addToAllowlist } from "../services/allowlist";
 import { forwardMessage } from "../services/hubspot-api";
 import { getOrCreateThreadId } from "../services/thread-session";
 
@@ -159,12 +158,6 @@ export async function handleApprovePending(
   if (!removed) {
     return jsonResponse({ error: "Message not found" }, 404);
   }
-
-  // Add sender to allowlist so future messages auto-forward
-  await addToAllowlist({
-    senderId: removed.senderId,
-    username: removed.senderUsername,
-  }, env);
 
   // Collect this message + all other pending messages from same sender
   const otherPending = await removePendingBySender(removed.senderId, env);

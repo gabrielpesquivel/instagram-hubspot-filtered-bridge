@@ -4,9 +4,7 @@ import { getUserProfile } from "../services/instagram-api";
 import { getInstagramPageId } from "../services/facebook-oauth";
 import { shouldForwardMessage } from "../services/filter";
 import { addPendingMessage } from "../services/pending";
-import { forwardMessage } from "../services/hubspot-api";
 import { incrementStat, appendLog } from "../services/stats";
-import { getOrCreateThreadId } from "../services/thread-session";
 import { clog, cerr } from "../services/logger";
 
 /**
@@ -80,8 +78,6 @@ export async function handleWebhook(
   return new Response("OK", { status: 200 });
 }
 
-const FORWARD_DELAY_MS = 30_000; // 30s delay so AI responses feel more natural
-
 async function processMessage(
   messaging: InstagramMessaging,
   env: Env,
@@ -128,7 +124,7 @@ async function processMessage(
     // Fetch sender profile
     const profile = await getUserProfile(senderId, env);
 
-    // Apply filter (pass raw senderId for allowlist/blocklist matching)
+    // Apply filter (pass raw senderId for blocklist matching)
     const filterResult = await shouldForwardMessage(senderId, profile, env);
 
     const senderLabel = profile.username ? `@${profile.username}` : senderId;
@@ -156,36 +152,6 @@ async function processMessage(
 
     const hasMedia = !!(message.attachments && message.attachments.length > 0);
     const messageText = message.text || (hasMedia ? "[media]" : "");
-
-    // Allowlisted senders get auto-forwarded after a delay so responses feel natural
-    if (filterResult.reason === "allowlisted") {
-      const conversationId = await getOrCreateThreadId(senderId, env);
-      ctx.waitUntil(
-        new Promise<void>((resolve) => setTimeout(resolve, FORWARD_DELAY_MS)).then(async () => {
-          const success = await forwardMessage(
-            senderId,
-            profile.username || senderId,
-            conversationId,
-            messageText,
-            env
-          );
-          if (success) {
-            await incrementStat("forwarded", env);
-            await appendLog({
-              type: "forwarded",
-              message: `${senderLabel} — "${messageText.slice(0, 80)}" (allowlisted, delayed)`,
-            }, env);
-          } else {
-            await incrementStat("errors", env);
-            await appendLog({
-              type: "error",
-              message: `Failed to auto-forward from allowlisted ${senderLabel}`,
-            }, env);
-          }
-        })
-      );
-      return;
-    }
 
     // Add to pending queue for manual approval
     await addPendingMessage({
