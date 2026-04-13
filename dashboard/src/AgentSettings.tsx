@@ -1,17 +1,15 @@
 import { useState, useEffect } from "react";
 
 interface AgentSettingsData {
-  guidelines: string;
   gemini_model: string;
   auto_approve_known: boolean;
   has_gemini_key: boolean;
 }
 
 const GEMINI_MODELS = [
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-1.5-flash",
-  "gemini-1.5-pro",
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-2.5-flash-lite",
 ];
 
 export function AgentSettings({
@@ -21,23 +19,18 @@ export function AgentSettings({
   settings: AgentSettingsData | null;
   onUpdate: () => void;
 }) {
-  const [guidelines, setGuidelines] = useState("");
-  const [model, setModel] = useState("gemini-2.0-flash");
+  const [model, setModel] = useState("gemini-2.5-flash");
   const [autoApprove, setAutoApprove] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     if (settings) {
-      setGuidelines(settings.guidelines);
       setModel(settings.gemini_model);
       setAutoApprove(settings.auto_approve_known);
-      setDirty(false);
     }
   }, [settings]);
 
   async function save(updates: Partial<{
-    guidelines: string;
     gemini_model: string;
     auto_approve_known: boolean;
   }>) {
@@ -48,7 +41,6 @@ export function AgentSettings({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
       });
-      setDirty(false);
       onUpdate();
     } finally {
       setSaving(false);
@@ -119,30 +111,6 @@ export function AgentSettings({
           </div>
           {settings && !settings.has_gemini_key && (
             <div style={styles.warning}>Gemini API key not set</div>
-          )}
-        </div>
-
-        <div style={styles.divider} />
-
-        {/* Guidelines */}
-        <div style={styles.field}>
-          <div style={styles.label}>Agent Guidelines</div>
-          <div style={styles.hint}>System prompt for AI-generated replies</div>
-          <textarea
-            value={guidelines}
-            onChange={(e) => { setGuidelines(e.target.value); setDirty(true); }}
-            placeholder="You are a helpful customer service agent..."
-            style={styles.textarea}
-            rows={5}
-          />
-          {dirty && (
-            <button
-              onClick={() => save({ guidelines })}
-              disabled={saving}
-              style={styles.saveBtn}
-            >
-              {saving ? "Saving..." : "Save Guidelines"}
-            </button>
           )}
         </div>
       </div>
@@ -239,29 +207,6 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#2196f3",
     color: "#fff",
     border: "1px solid #2196f3",
-    fontWeight: 600,
-  },
-  textarea: {
-    width: "100%",
-    padding: "0.5rem",
-    border: "1px solid #ccc",
-    borderRadius: "4px",
-    fontSize: "0.8rem",
-    resize: "vertical" as const,
-    outline: "none",
-    fontFamily: "inherit",
-    lineHeight: 1.4,
-    boxSizing: "border-box" as const,
-  },
-  saveBtn: {
-    marginTop: "0.5rem",
-    padding: "0.35rem 0.8rem",
-    background: "#2196f3",
-    color: "#fff",
-    border: "none",
-    borderRadius: "4px",
-    cursor: "pointer",
-    fontSize: "0.75rem",
     fontWeight: 600,
   },
 };

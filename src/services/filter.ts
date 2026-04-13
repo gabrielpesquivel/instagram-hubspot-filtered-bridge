@@ -32,7 +32,7 @@ export async function saveFilterSettings(
 }
 
 /**
- * Determine if a message should be forwarded to HubSpot.
+ * Determine if a message should be forwarded.
  * Returns shouldForward: true for messages that go to the pending queue.
  *
  * senderId is the raw webhook sender.id — used for blocklist checks

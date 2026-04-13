@@ -36,7 +36,6 @@ interface FilterSettingsData {
 }
 
 interface AgentSettingsData {
-  guidelines: string;
   gemini_model: string;
   auto_approve_known: boolean;
   has_gemini_key: boolean;
@@ -127,39 +126,47 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
   }
 
   async function handleApprove(id: string) {
-    await fetch("/api/pending/approve", {
+    const msg = pendingMessages.find((m) => m.id === id);
+    // Remove this message + all from same sender instantly
+    if (msg) {
+      setPendingMessages((prev) => prev.filter((m) => m.senderId !== msg.senderId));
+    }
+    fetch("/api/pending/approve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
-    });
-    fetchData();
+    }).then(() => fetchData());
   }
 
   async function handleReject(id: string) {
-    await fetch("/api/pending/reject", {
+    const msg = pendingMessages.find((m) => m.id === id);
+    if (msg) {
+      setPendingMessages((prev) => prev.filter((m) => m.senderId !== msg.senderId));
+      setBlocklist((prev) => [...prev, { senderId: msg.senderId, username: msg.senderUsername, blockedAt: new Date().toISOString() }]);
+    }
+    fetch("/api/pending/reject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
-    });
-    fetchData();
+    }).then(() => fetchData());
   }
 
   async function handleDismiss(id: string) {
-    await fetch("/api/pending/dismiss", {
+    setPendingMessages((prev) => prev.filter((m) => m.id !== id));
+    fetch("/api/pending/dismiss", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
-    });
-    fetchData();
+    }).then(() => fetchData());
   }
 
   async function handleUnblock(senderId: string) {
-    await fetch("/api/blocklist/unblock", {
+    setBlocklist((prev) => prev.filter((e) => e.senderId !== senderId));
+    fetch("/api/blocklist/unblock", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ senderId }),
-    });
-    fetchData();
+    }).then(() => fetchData());
   }
 
   async function handleAddBlock() {

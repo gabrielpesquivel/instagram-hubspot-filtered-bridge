@@ -6,6 +6,7 @@ import { getCookie, isAuthenticated, jsonResponse } from "../utils/auth";
 import { getPendingMessages, removePendingMessage, removePendingBySender } from "../services/pending";
 import { getBlocklist, addToBlocklist, removeFromBlocklist } from "../services/blocklist";
 import { addMessageToConversation } from "../services/conversations";
+import { translateMessage } from "../services/gemini-api";
 
 const SESSION_TTL = 24 * 60 * 60; // 24 hours in seconds
 
@@ -159,12 +160,17 @@ export async function handleApprovePending(
     : `@${removed.senderUsername}`;
 
   for (const msg of allMessages) {
+    let translation: string | undefined;
+    if (env.GEMINI_API_KEY) {
+      translation = (await translateMessage(msg.messageText, env)) ?? undefined;
+    }
     await addMessageToConversation(
       msg.senderId,
       msg.senderUsername,
       msg.messageText,
       "user",
-      env
+      env,
+      translation
     );
     await incrementStat("forwarded", env);
     await appendLog({

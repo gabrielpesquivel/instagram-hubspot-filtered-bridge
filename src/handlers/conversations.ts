@@ -6,12 +6,12 @@ import {
   addMessageToConversation,
   archiveConversation,
   markConversationRead,
+  setAutoReply,
+  deleteMessage,
 } from "../services/conversations";
 import { sendMessage } from "../services/instagram-api";
 import {
   generateReply,
-  getAgentGuidelines,
-  saveAgentGuidelines,
   getGeminiSettings,
   saveGeminiSettings,
 } from "../services/gemini-api";
@@ -86,7 +86,7 @@ export async function handleReplyConversation(
   return jsonResponse({ ok: true });
 }
 
-export async function handleGenerateReply(
+export async function handleGenerateAndSendReply(
   request: Request,
   env: Env,
   senderId: string
@@ -106,7 +106,23 @@ export async function handleGenerateReply(
 
   try {
     const suggestion = await generateReply(conv.messages, env);
-    return jsonResponse({ suggestion });
+
+    // Send immediately via Instagram
+    const sent = await sendMessage(senderId, suggestion, env);
+    if (!sent) {
+      return jsonResponse({ error: "Generated reply but failed to send via Instagram", suggestion }, 500);
+    }
+
+    // Store in conversation
+    await addMessageToConversation(senderId, conv.senderUsername, suggestion, "agent", env);
+
+    await incrementStat("replied", env);
+    await appendLog({
+      type: "replied",
+      message: `AI reply to @${conv.senderUsername} — "${suggestion.slice(0, 80)}"`,
+    }, env);
+
+    return jsonResponse({ ok: true, suggestion });
   } catch (error) {
     return jsonResponse({
       error: `Generation failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -130,6 +146,50 @@ export async function handleArchiveConversation(
   return jsonResponse({ ok: true });
 }
 
+export async function handleSetAutoReply(
+  request: Request,
+  env: Env,
+  senderId: string
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  let body: { enabled?: boolean };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON" }, 400);
+  }
+
+  if (body.enabled === undefined) {
+    return jsonResponse({ error: "Missing enabled" }, 400);
+  }
+
+  const ok = await setAutoReply(senderId, body.enabled, env);
+  if (!ok) {
+    return jsonResponse({ error: "Conversation not found" }, 404);
+  }
+  return jsonResponse({ ok: true });
+}
+
+export async function handleDeleteMessage(
+  request: Request,
+  env: Env,
+  senderId: string,
+  messageId: string
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  const deleted = await deleteMessage(senderId, messageId, env);
+  if (!deleted) {
+    return jsonResponse({ error: "Message not found" }, 404);
+  }
+  return jsonResponse({ ok: true });
+}
+
 export async function handleGetAgentSettings(
   request: Request,
   env: Env
@@ -138,17 +198,12 @@ export async function handleGetAgentSettings(
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
 
-  const [guidelines, geminiSettings] = await Promise.all([
-    getAgentGuidelines(env),
-    getGeminiSettings(env),
-  ]);
+  const geminiSettings = await getGeminiSettings(env);
 
-  // Read auto_approve_known from filter_settings
   const filterRaw = await env.PROFILE_CACHE.get("filter_settings");
   const filterSettings = filterRaw ? JSON.parse(filterRaw) : {};
 
   return jsonResponse({
-    guidelines,
     gemini_model: geminiSettings.model,
     auto_approve_known: filterSettings.auto_approve_known ?? false,
     has_gemini_key: !!env.GEMINI_API_KEY,
@@ -163,15 +218,11 @@ export async function handleUpdateAgentSettings(
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
 
-  let body: { guidelines?: string; gemini_model?: string; auto_approve_known?: boolean };
+  let body: { gemini_model?: string; auto_approve_known?: boolean };
   try {
     body = await request.json();
   } catch {
     return jsonResponse({ error: "Invalid JSON" }, 400);
-  }
-
-  if (body.guidelines !== undefined) {
-    await saveAgentGuidelines(body.guidelines, env);
   }
 
   if (body.gemini_model) {

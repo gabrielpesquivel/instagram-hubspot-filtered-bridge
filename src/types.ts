@@ -81,6 +81,7 @@ export interface ConversationMessage {
   id: string;
   sender: "user" | "agent";
   text: string;
+  translation?: string;
   timestamp: string;
 }
 
@@ -88,6 +89,7 @@ export interface Conversation {
   senderId: string;
   senderUsername: string;
   messages: ConversationMessage[];
+  autoReply: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -98,5 +100,6 @@ export interface ConversationSummary {
   lastMessageSnippet: string;
   lastMessageAt: string;
   unread: boolean;
+  autoReply: boolean;
   status: "active" | "archived";
 }

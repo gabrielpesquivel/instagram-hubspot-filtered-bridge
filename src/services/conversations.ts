@@ -11,7 +11,10 @@ export async function getConversation(
   env: Env
 ): Promise<Conversation | null> {
   const raw = await env.PROFILE_CACHE.get(convKey(senderId));
-  return raw ? JSON.parse(raw) : null;
+  if (!raw) return null;
+  const conv = JSON.parse(raw) as Conversation;
+  if (conv.autoReply === undefined) conv.autoReply = false;
+  return conv;
 }
 
 export async function getOrCreateConversation(
@@ -27,6 +30,7 @@ export async function getOrCreateConversation(
     senderId,
     senderUsername,
     messages: [],
+    autoReply: false,
     createdAt: now,
     updatedAt: now,
   };
@@ -34,12 +38,29 @@ export async function getOrCreateConversation(
   return conv;
 }
 
+export async function deleteMessage(
+  senderId: string,
+  messageId: string,
+  env: Env
+): Promise<boolean> {
+  const conv = await getConversation(senderId, env);
+  if (!conv) return false;
+
+  const idx = conv.messages.findIndex((m) => m.id === messageId);
+  if (idx === -1) return false;
+
+  conv.messages.splice(idx, 1);
+  await env.PROFILE_CACHE.put(convKey(senderId), JSON.stringify(conv));
+  return true;
+}
+
 export async function addMessageToConversation(
   senderId: string,
   senderUsername: string,
   text: string,
   sender: "user" | "agent",
-  env: Env
+  env: Env,
+  translation?: string
 ): Promise<ConversationMessage> {
   const conv = await getOrCreateConversation(senderId, senderUsername, env);
 
@@ -47,6 +68,7 @@ export async function addMessageToConversation(
     id: crypto.randomUUID(),
     sender,
     text,
+    ...(translation ? { translation } : {}),
     timestamp: new Date().toISOString(),
   };
 
@@ -97,6 +119,28 @@ export async function markConversationRead(
   }
 }
 
+export async function setAutoReply(
+  senderId: string,
+  enabled: boolean,
+  env: Env
+): Promise<boolean> {
+  // Update conversation object
+  const conv = await getConversation(senderId, env);
+  if (!conv) return false;
+  conv.autoReply = enabled;
+  await env.PROFILE_CACHE.put(convKey(senderId), JSON.stringify(conv));
+
+  // Update index
+  const raw = await env.PROFILE_CACHE.get(INDEX_KEY);
+  const index: ConversationSummary[] = raw ? JSON.parse(raw) : [];
+  const entry = index.find((s) => s.senderId === senderId);
+  if (entry) {
+    entry.autoReply = enabled;
+    await env.PROFILE_CACHE.put(INDEX_KEY, JSON.stringify(index));
+  }
+  return true;
+}
+
 async function updateIndex(
   senderId: string,
   senderUsername: string,
@@ -123,6 +167,7 @@ async function updateIndex(
       lastMessageSnippet: lastMessage.slice(0, 80),
       lastMessageAt: now,
       unread,
+      autoReply: false,
       status: "active",
     });
   }

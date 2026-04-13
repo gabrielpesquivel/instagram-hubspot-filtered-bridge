@@ -19,8 +19,10 @@ import {
   handleGetConversations,
   handleGetConversation,
   handleReplyConversation,
-  handleGenerateReply,
+  handleGenerateAndSendReply,
   handleArchiveConversation,
+  handleSetAutoReply,
+  handleDeleteMessage,
   handleGetAgentSettings,
   handleUpdateAgentSettings,
 } from "./handlers/conversations";
@@ -93,6 +95,14 @@ export default {
       return handleGetConversations(request, env);
     }
 
+    // Delete message route: /api/conversations/:senderId/messages/:messageId
+    const msgDeleteMatch = path.match(/^\/api\/conversations\/([^/]+)\/messages\/([^/]+)$/);
+    if (msgDeleteMatch && request.method === "DELETE") {
+      const senderId = decodeURIComponent(msgDeleteMatch[1]);
+      const messageId = decodeURIComponent(msgDeleteMatch[2]);
+      return handleDeleteMessage(request, env, senderId, messageId);
+    }
+
     // Conversation routes with senderId param
     const convMatch = path.match(/^\/api\/conversations\/([^/]+)(?:\/(.+))?$/);
     if (convMatch) {
@@ -106,10 +116,13 @@ export default {
         return handleReplyConversation(request, env, senderId);
       }
       if (action === "generate" && request.method === "POST") {
-        return handleGenerateReply(request, env, senderId);
+        return handleGenerateAndSendReply(request, env, senderId);
       }
       if (action === "archive" && request.method === "POST") {
         return handleArchiveConversation(request, env, senderId);
+      }
+      if (action === "auto-reply" && request.method === "POST") {
+        return handleSetAutoReply(request, env, senderId);
       }
     }
 

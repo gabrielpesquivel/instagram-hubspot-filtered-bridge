@@ -6,6 +6,7 @@ interface ConversationSummary {
   lastMessageSnippet: string;
   lastMessageAt: string;
   unread: boolean;
+  autoReply?: boolean;
   status: string;
 }
 
@@ -13,6 +14,7 @@ interface ConversationMessage {
   id: string;
   sender: "user" | "agent";
   text: string;
+  translation?: string;
   timestamp: string;
 }
 
@@ -20,6 +22,7 @@ interface ConversationFull {
   senderId: string;
   senderUsername: string;
   messages: ConversationMessage[];
+  autoReply: boolean;
 }
 
 export function Conversations() {
@@ -27,9 +30,13 @@ export function Conversations() {
   const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [selectedUsername, setSelectedUsername] = useState("");
+  const [autoReply, setAutoReply] = useState(false);
   const [replyText, setReplyText] = useState("");
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState("");
   const [sending, setSending] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   async function fetchConversations() {
@@ -46,13 +53,20 @@ export function Conversations() {
         const data: ConversationFull = await res.json();
         setMessages(data.messages);
         setSelectedUsername(data.senderUsername);
+        setAutoReply(data.autoReply ?? false);
       }
     } catch { /* ignore */ }
+    finally {
+      setLoadingMessages(false);
+    }
   }
 
   function selectConversation(senderId: string) {
     setSelected(senderId);
+    setMessages([]);
     setReplyText("");
+    setGenerateError("");
+    setLoadingMessages(true);
     fetchMessages(senderId);
   }
 
@@ -61,7 +75,6 @@ export function Conversations() {
     setSending(true);
     const text = replyText.trim();
 
-    // Optimistic UI
     const optimistic: ConversationMessage = {
       id: "temp-" + Date.now(),
       sender: "agent",
@@ -78,7 +91,6 @@ export function Conversations() {
         body: JSON.stringify({ text }),
       });
       if (!res.ok) {
-        // Revert optimistic
         setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
         setReplyText(text);
       } else {
@@ -95,18 +107,42 @@ export function Conversations() {
   async function handleGenerate() {
     if (!selected || generating) return;
     setGenerating(true);
+    setGenerateError("");
     try {
       const res = await fetch(`/api/conversations/${encodeURIComponent(selected)}/generate`, {
         method: "POST",
       });
+      const data = await res.json();
       if (res.ok) {
-        const data = await res.json();
-        setReplyText(data.suggestion || "");
+        // Server already sent it — add to messages optimistically
+        const sent: ConversationMessage = {
+          id: "ai-" + Date.now(),
+          sender: "agent",
+          text: data.suggestion,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, sent]);
+        fetchConversations();
+      } else {
+        setGenerateError(data.error || "Generation failed");
       }
-    } catch { /* ignore */ }
-    finally {
+    } catch {
+      setGenerateError("Network error");
+    } finally {
       setGenerating(false);
     }
+  }
+
+  async function handleToggleAutoReply() {
+    if (!selected) return;
+    const next = !autoReply;
+    setAutoReply(next);
+    await fetch(`/api/conversations/${encodeURIComponent(selected)}/auto-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    fetchConversations();
   }
 
   async function handleArchive() {
@@ -117,6 +153,25 @@ export function Conversations() {
     setSelected(null);
     setMessages([]);
     fetchConversations();
+  }
+
+  async function handleDeleteMessage(messageId: string) {
+    if (!selected || deletingId) return;
+    setDeletingId(messageId);
+    setMessages((prev) => prev.filter((m) => m.id !== messageId));
+    try {
+      const res = await fetch(
+        `/api/conversations/${encodeURIComponent(selected)}/messages/${encodeURIComponent(messageId)}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        fetchMessages(selected);
+      }
+    } catch {
+      fetchMessages(selected);
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   useEffect(() => {
@@ -167,7 +222,10 @@ export function Conversations() {
               }}
             >
               <div style={styles.convTop}>
-                <span style={styles.convUser}>@{c.senderUsername}</span>
+                <span style={styles.convUser}>
+                  @{c.senderUsername}
+                  {c.autoReply && <span style={styles.autoReplyBadge}>AI</span>}
+                </span>
                 <span style={styles.convTime}>{formatTime(c.lastMessageAt)}</span>
               </div>
               <div style={styles.convSnippet}>{c.lastMessageSnippet}</div>
@@ -185,24 +243,54 @@ export function Conversations() {
           <>
             <div style={styles.messageHeader}>
               <span style={styles.messageHeaderUser}>@{selectedUsername}</span>
-              <button onClick={handleArchive} style={styles.archiveBtn}>
-                Archive
-              </button>
+              <div style={styles.headerActions}>
+                <button
+                  onClick={handleToggleAutoReply}
+                  style={{
+                    ...styles.autoReplyBtn,
+                    ...(autoReply ? styles.autoReplyBtnOn : {}),
+                  }}
+                >
+                  {autoReply ? "Auto-reply ON" : "Auto-reply OFF"}
+                </button>
+                <button onClick={handleArchive} style={styles.archiveBtn}>
+                  Archive
+                </button>
+              </div>
             </div>
             <div style={styles.messageList}>
-              {messages.map((m) => (
+              {loadingMessages ? (
+                <div style={styles.loadingMessages}>Loading...</div>
+              ) : messages.map((m) => (
                 <div
                   key={m.id}
                   style={{
-                    ...styles.bubble,
-                    ...(m.sender === "agent" ? styles.bubbleAgent : styles.bubbleUser),
+                    ...styles.bubbleRow,
+                    ...(m.sender === "agent" ? styles.bubbleRowAgent : {}),
                   }}
                 >
-                  <div style={styles.bubbleText}>{m.text}</div>
-                  <div style={styles.bubbleTime}>{formatTime(m.timestamp)}</div>
+                  <div
+                    style={{
+                      ...styles.bubble,
+                      ...(m.sender === "agent" ? styles.bubbleAgent : styles.bubbleUser),
+                    }}
+                  >
+                    <div style={styles.bubbleText}>{m.text}</div>
+                    {m.translation && (
+                      <div style={styles.translation}>{m.translation}</div>
+                    )}
+                    <div style={styles.bubbleTime}>{formatTime(m.timestamp)}</div>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteMessage(m.id)}
+                    style={styles.deleteBtn}
+                    title="Delete message"
+                  >
+                    ×
+                  </button>
                 </div>
               ))}
-              <div ref={messagesEndRef} />
+              {!loadingMessages && <div ref={messagesEndRef} />}
             </div>
             <div style={styles.replyArea}>
               <textarea
@@ -219,12 +307,15 @@ export function Conversations() {
                 }}
               />
               <div style={styles.replyButtons}>
+                {generateError && (
+                  <span style={styles.generateError}>{generateError}</span>
+                )}
                 <button
                   onClick={handleGenerate}
                   disabled={generating}
                   style={styles.generateBtn}
                 >
-                  {generating ? "Generating..." : "AI Reply"}
+                  {generating ? "Sending..." : "AI Reply"}
                 </button>
                 <button
                   onClick={handleSend}
@@ -294,6 +385,9 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     fontSize: "0.8rem",
     color: "#333",
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
   },
   convTime: {
     fontSize: "0.7rem",
@@ -305,6 +399,14 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap" as const,
+  },
+  autoReplyBadge: {
+    fontSize: "0.55rem",
+    fontWeight: 700,
+    background: "#7c4dff",
+    color: "#fff",
+    padding: "1px 4px",
+    borderRadius: "3px",
   },
   unreadDot: {
     position: "absolute" as const,
@@ -321,6 +423,14 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column" as const,
     minWidth: 0,
+  },
+  loadingMessages: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+    color: "#999",
+    fontSize: "0.85rem",
   },
   noSelection: {
     display: "flex",
@@ -342,6 +452,26 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     fontSize: "0.9rem",
   },
+  headerActions: {
+    display: "flex",
+    gap: "0.4rem",
+    alignItems: "center",
+  },
+  autoReplyBtn: {
+    padding: "0.25rem 0.5rem",
+    background: "none",
+    border: "1px solid #ccc",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "0.7rem",
+    fontWeight: 600,
+    color: "#999",
+  },
+  autoReplyBtnOn: {
+    background: "#7c4dff",
+    color: "#fff",
+    border: "1px solid #7c4dff",
+  },
   archiveBtn: {
     padding: "0.25rem 0.6rem",
     background: "none",
@@ -358,6 +488,28 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column" as const,
     gap: "0.5rem",
+  },
+  bubbleRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+    alignSelf: "flex-start",
+  },
+  bubbleRowAgent: {
+    alignSelf: "flex-end",
+    flexDirection: "row-reverse" as const,
+  },
+  deleteBtn: {
+    background: "none",
+    border: "none",
+    color: "#ccc",
+    cursor: "pointer",
+    fontSize: "1rem",
+    padding: "2px 4px",
+    borderRadius: "4px",
+    lineHeight: 1,
+    opacity: 0.4,
+    flexShrink: 0,
   },
   bubble: {
     maxWidth: "75%",
@@ -379,6 +531,14 @@ const styles: Record<string, React.CSSProperties> = {
   },
   bubbleText: {
     whiteSpace: "pre-wrap" as const,
+  },
+  translation: {
+    fontSize: "0.75rem",
+    fontStyle: "italic" as const,
+    opacity: 0.7,
+    marginTop: "3px",
+    paddingTop: "3px",
+    borderTop: "1px solid rgba(0,0,0,0.1)",
   },
   bubbleTime: {
     fontSize: "0.65rem",
@@ -407,6 +567,12 @@ const styles: Record<string, React.CSSProperties> = {
     gap: "0.5rem",
     marginTop: "0.5rem",
     justifyContent: "flex-end",
+    alignItems: "center",
+  },
+  generateError: {
+    fontSize: "0.72rem",
+    color: "#f44336",
+    flex: 1,
   },
   generateBtn: {
     padding: "0.4rem 0.8rem",

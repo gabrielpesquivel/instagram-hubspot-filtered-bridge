@@ -6,7 +6,9 @@ import { shouldForwardMessage } from "../services/filter";
 import { addPendingMessage } from "../services/pending";
 import { incrementStat, appendLog } from "../services/stats";
 import { clog, cerr } from "../services/logger";
-import { addMessageToConversation, getConversation } from "../services/conversations";
+import { addMessageToConversation, getConversation, markConversationRead } from "../services/conversations";
+import { generateReply, translateMessage } from "../services/gemini-api";
+import { sendMessage } from "../services/instagram-api";
 
 /**
  * Handle Instagram webhook verification (GET request)
@@ -99,23 +101,26 @@ async function processMessage(
   const senderId = sender.id;
 
   // Detect echo messages (sent BY the business account)
-  // Capture in conversation as agent message
+  // Only store if not already captured by our reply handler (avoids duplicates)
   if (message.is_echo) {
     const recipientId = messaging.recipient.id;
     const text = message.text || "";
     await clog(env, `Echo message detected (sent by business account to ${recipientId})`);
 
-    // Add to conversation if one exists
     const existingConv = await getConversation(recipientId, env);
     if (existingConv && text) {
-      await addMessageToConversation(recipientId, existingConv.senderUsername, text, "agent", env);
+      const lastMsg = existingConv.messages[existingConv.messages.length - 1];
+      const isDuplicate = lastMsg && lastMsg.sender === "agent" && lastMsg.text === text;
+      if (!isDuplicate) {
+        // Sent from Instagram app directly — capture it
+        await addMessageToConversation(recipientId, existingConv.senderUsername, text, "agent", env);
+        await incrementStat("replied", env);
+        await appendLog({
+          type: "replied",
+          message: `Sent to ${recipientId} — "${text.slice(0, 80)}"`,
+        }, env);
+      }
     }
-
-    await incrementStat("replied", env);
-    await appendLog({
-      type: "replied",
-      message: `Sent to ${recipientId} — "${text.slice(0, 80)}"`,
-    }, env);
     return;
   }
 
@@ -173,13 +178,40 @@ async function processMessage(
 
     if (existingConv && autoApprove) {
       // Auto-approve: add directly to conversation, skip pending queue
-      await addMessageToConversation(senderId, senderUsername, messageText, "user", env);
+      let translation: string | undefined;
+      if (env.GEMINI_API_KEY) {
+        translation = (await translateMessage(messageText, env)) ?? undefined;
+      }
+      await addMessageToConversation(senderId, senderUsername, messageText, "user", env, translation);
       await clog(env, `Auto-approved message from ${senderId} (existing conversation)`);
       await incrementStat("forwarded", env);
       await appendLog({
         type: "forwarded",
         message: `${senderLabel} — "${messageText.slice(0, 80)}" (auto)`,
       }, env);
+
+      // Auto-reply if enabled for this conversation
+      if (existingConv.autoReply && env.GEMINI_API_KEY) {
+        try {
+          // Re-fetch to get updated messages
+          const updatedConv = await getConversation(senderId, env);
+          if (updatedConv) {
+            const reply = await generateReply(updatedConv.messages, env);
+            const sent = await sendMessage(senderId, reply, env);
+            if (sent) {
+              await addMessageToConversation(senderId, senderUsername, reply, "agent", env);
+              await markConversationRead(senderId, env);
+              await incrementStat("replied", env);
+              await appendLog({
+                type: "replied",
+                message: `AI auto-reply to ${senderLabel} — "${reply.slice(0, 80)}"`,
+              }, env);
+            }
+          }
+        } catch (error) {
+          await cerr(env, `Auto-reply failed for ${senderId}:`, error);
+        }
+      }
       return;
     }
 
