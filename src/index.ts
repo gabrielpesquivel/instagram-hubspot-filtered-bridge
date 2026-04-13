@@ -1,6 +1,5 @@
 import type { Env } from "./types";
 import { handleVerification, handleWebhook } from "./handlers/instagram";
-import { handleHubSpotWebhook } from "./handlers/hubspot";
 import {
   handleLogin,
   handleLogout,
@@ -17,6 +16,15 @@ import {
   handleUnblock,
 } from "./handlers/dashboard";
 import {
+  handleGetConversations,
+  handleGetConversation,
+  handleReplyConversation,
+  handleGenerateReply,
+  handleArchiveConversation,
+  handleGetAgentSettings,
+  handleUpdateAgentSettings,
+} from "./handlers/conversations";
+import {
   handleFacebookAuthInit,
   handleFacebookCallback,
   handleGetConnection,
@@ -29,21 +37,6 @@ import {
   handleGetFilterSettings,
   handleUpdateFilterSettings,
 } from "./handlers/meta-api";
-import {
-  exchangeCodeForTokens,
-  finalizeChannelConnection,
-} from "./services/hubspot-api";
-import { clog, cerr } from "./services/logger";
-
-const HUBSPOT_AUTHORIZE_URL = "https://app.hubspot.com/oauth/authorize";
-const HUBSPOT_SCOPES = [
-  "conversations.custom_channels.read",
-  "conversations.custom_channels.write",
-  "conversations.read",
-  "conversations.write",
-  "crm.objects.contacts.read",
-  "crm.objects.contacts.write",
-];
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -95,6 +88,39 @@ export default {
       return handleUnblock(request, env);
     }
 
+    // Conversations API
+    if (path === "/api/conversations" && request.method === "GET") {
+      return handleGetConversations(request, env);
+    }
+
+    // Conversation routes with senderId param
+    const convMatch = path.match(/^\/api\/conversations\/([^/]+)(?:\/(.+))?$/);
+    if (convMatch) {
+      const senderId = decodeURIComponent(convMatch[1]);
+      const action = convMatch[2];
+
+      if (!action && request.method === "GET") {
+        return handleGetConversation(request, env, senderId);
+      }
+      if (action === "reply" && request.method === "POST") {
+        return handleReplyConversation(request, env, senderId);
+      }
+      if (action === "generate" && request.method === "POST") {
+        return handleGenerateReply(request, env, senderId);
+      }
+      if (action === "archive" && request.method === "POST") {
+        return handleArchiveConversation(request, env, senderId);
+      }
+    }
+
+    // Agent settings
+    if (path === "/api/settings/agent" && request.method === "GET") {
+      return handleGetAgentSettings(request, env);
+    }
+    if (path === "/api/settings/agent" && request.method === "POST") {
+      return handleUpdateAgentSettings(request, env);
+    }
+
     // Facebook OAuth
     if (path === "/auth/facebook" && request.method === "GET") {
       return handleFacebookAuthInit(request, env);
@@ -131,106 +157,11 @@ export default {
     // Instagram webhook
     if (path === "/webhook/instagram") {
       if (request.method === "GET") {
-        // Webhook verification
         return handleVerification(url, env);
       }
 
       if (request.method === "POST") {
-        // Incoming message
         return handleWebhook(request, env, ctx);
-      }
-    }
-
-    // HubSpot outbound webhook
-    if (path === "/webhook/hubspot" && request.method === "POST") {
-      return handleHubSpotWebhook(request, env);
-    }
-
-    // HubSpot OAuth: initiate authorization
-    if (path === "/auth/hubspot" && request.method === "GET") {
-      const redirectUri = `${url.origin}/auth/hubspot/callback`;
-      const params = new URLSearchParams({
-        client_id: env.HUBSPOT_CLIENT_ID,
-        redirect_uri: redirectUri,
-        scope: HUBSPOT_SCOPES.join(" "),
-      });
-
-      return Response.redirect(
-        `${HUBSPOT_AUTHORIZE_URL}?${params.toString()}`,
-        302
-      );
-    }
-
-    // HubSpot OAuth: callback
-    if (path === "/auth/hubspot/callback" && request.method === "GET") {
-      const code = url.searchParams.get("code");
-
-      if (!code) {
-        const error = url.searchParams.get("error");
-        return new Response(
-          `Authorization failed: ${error || "no code received"}`,
-          { status: 400 }
-        );
-      }
-
-      const redirectUri = `${url.origin}/auth/hubspot/callback`;
-      const tokens = await exchangeCodeForTokens(code, redirectUri, env);
-
-      if (!tokens) {
-        return new Response("Failed to exchange authorization code for tokens", {
-          status: 500,
-        });
-      }
-
-      return new Response(
-        "HubSpot OAuth authorized successfully. Tokens stored. You can close this tab.",
-        { status: 200 }
-      );
-    }
-
-    // HubSpot channel account connection flow
-    if (path === "/connect/hubspot" && request.method === "GET") {
-      try {
-        const accountToken = url.searchParams.get("accountToken");
-        const channelId = url.searchParams.get("channelId");
-        const redirectUrl = url.searchParams.get("redirectUrl");
-
-        await clog(env, "Connect flow params:", {
-          accountToken: accountToken ? "present" : "missing",
-          channelId,
-          redirectUrl: redirectUrl ? "present" : "missing",
-        });
-
-        if (!accountToken || !channelId || !redirectUrl) {
-          return new Response(
-            `Missing required parameters. Got: accountToken=${!!accountToken}, channelId=${!!channelId}, redirectUrl=${!!redirectUrl}`,
-            { status: 400 }
-          );
-        }
-
-        const result = await finalizeChannelConnection(
-          channelId,
-          accountToken,
-          env
-        );
-
-        if (!result.success) {
-          return new Response(
-            `Failed to connect channel account: ${result.error}`,
-            { status: 500 }
-          );
-        }
-
-        return new Response(null, {
-          status: 302,
-          headers: { Location: redirectUrl },
-        });
-      } catch (error) {
-        await cerr(env, "Connect flow error:", error);
-        return new Response(
-          `Connection error: ${error instanceof Error ? error.message : String(error)}`,
-          { status: 500 }
-        );
       }
     }
 

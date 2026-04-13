@@ -5,8 +5,7 @@ import { getConnection } from "../services/facebook-oauth";
 import { getCookie, isAuthenticated, jsonResponse } from "../utils/auth";
 import { getPendingMessages, removePendingMessage, removePendingBySender } from "../services/pending";
 import { getBlocklist, addToBlocklist, removeFromBlocklist } from "../services/blocklist";
-import { forwardMessage } from "../services/hubspot-api";
-import { getOrCreateThreadId } from "../services/thread-session";
+import { addMessageToConversation } from "../services/conversations";
 
 const SESSION_TTL = 24 * 60 * 60; // 24 hours in seconds
 
@@ -107,20 +106,12 @@ export async function handleHealth(
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
 
-  const [oauthTokens, channelId, metaConnection] = await Promise.all([
-    env.PROFILE_CACHE.get("hubspot_oauth_tokens"),
-    Promise.resolve(env.HUBSPOT_CUSTOM_CHANNEL_ID),
-    getConnection(env),
-  ]);
-
-  const hasToken = !!oauthTokens;
-  const pipelineActive = hasToken && !!channelId;
+  const metaConnection = await getConnection(env);
 
   return jsonResponse({
-    pipeline_active: pipelineActive,
-    has_hubspot_token: hasToken,
-    has_channel_id: !!channelId,
+    pipeline_active: !!metaConnection,
     has_meta_connection: !!metaConnection,
+    has_gemini_key: !!env.GEMINI_API_KEY,
   });
 }
 
@@ -166,36 +157,22 @@ export async function handleApprovePending(
   const senderLabel = removed.senderUsername.startsWith("@")
     ? removed.senderUsername
     : `@${removed.senderUsername}`;
-  const conversationId = await getOrCreateThreadId(removed.senderId, env);
-  let errorCount = 0;
 
   for (const msg of allMessages) {
-    const success = await forwardMessage(
+    await addMessageToConversation(
       msg.senderId,
       msg.senderUsername,
-      conversationId,
       msg.messageText,
+      "user",
       env
     );
-    if (success) {
-      await incrementStat("forwarded", env);
-      await appendLog({
-        type: "forwarded",
-        message: `${senderLabel} — "${msg.messageText.slice(0, 80)}"`,
-      }, env);
-    } else {
-      errorCount++;
-      await incrementStat("errors", env);
-      await appendLog({
-        type: "error",
-        message: `Failed to forward approved message from ${senderLabel}`,
-      }, env);
-    }
+    await incrementStat("forwarded", env);
+    await appendLog({
+      type: "forwarded",
+      message: `${senderLabel} — "${msg.messageText.slice(0, 80)}"`,
+    }, env);
   }
 
-  if (errorCount > 0) {
-    return jsonResponse({ error: `Failed to forward ${errorCount}/${allMessages.length} messages` }, 500);
-  }
   return jsonResponse({ ok: true, forwarded: allMessages.length });
 }
 

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { MetaConnection } from "./MetaConnection";
 import { FilterSettings } from "./FilterSettings";
 import { WebhookSubscriptions } from "./WebhookSubscriptions";
+import { Conversations } from "./Conversations";
+import { AgentSettings } from "./AgentSettings";
 
 interface Stats {
   pending: { total: number; today: number };
@@ -15,9 +17,8 @@ interface Stats {
 
 interface Health {
   pipeline_active: boolean;
-  has_hubspot_token: boolean;
-  has_channel_id: boolean;
   has_meta_connection: boolean;
+  has_gemini_key: boolean;
 }
 
 interface MetaConnectionData {
@@ -32,6 +33,13 @@ interface MetaConnectionData {
 interface FilterSettingsData {
   min_followers: number;
   skip_verified: boolean;
+}
+
+interface AgentSettingsData {
+  guidelines: string;
+  gemini_model: string;
+  auto_approve_known: boolean;
+  has_gemini_key: boolean;
 }
 
 interface LogEntry {
@@ -63,7 +71,7 @@ interface BlocklistEntry {
   blockedAt: string;
 }
 
-type LogTab = "pending" | "skipped" | "forwarded";
+type LogTab = "pending" | "skipped" | "conversations";
 
 export function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -74,6 +82,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     useState<MetaConnectionData | null>(null);
   const [filterSettings, setFilterSettings] =
     useState<FilterSettingsData | null>(null);
+  const [agentSettings, setAgentSettings] =
+    useState<AgentSettingsData | null>(null);
   const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
   const [blocklist, setBlocklist] = useState<BlocklistEntry[]>([]);
   const [blockInput, setBlockInput] = useState("");
@@ -83,7 +93,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   async function fetchData() {
     try {
-      const [statsRes, healthRes, logsRes, consoleRes, connectionRes, filterRes, pendingRes, blocklistRes] =
+      const [statsRes, healthRes, logsRes, consoleRes, connectionRes, filterRes, agentRes, pendingRes, blocklistRes] =
         await Promise.all([
           fetch("/api/stats"),
           fetch("/api/health"),
@@ -91,6 +101,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
           fetch("/api/console-logs"),
           fetch("/api/meta/connection"),
           fetch("/api/settings/filter"),
+          fetch("/api/settings/agent"),
           fetch("/api/pending"),
           fetch("/api/blocklist"),
         ]);
@@ -106,6 +117,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
       if (consoleRes.ok) setConsoleLogs(await consoleRes.json());
       if (connectionRes.ok) setMetaConnection(await connectionRes.json());
       if (filterRes.ok) setFilterSettings(await filterRes.json());
+      if (agentRes.ok) setAgentSettings(await agentRes.json());
       if (pendingRes.ok) setPendingMessages(await pendingRes.json());
       if (blocklistRes.ok) setBlocklist(await blocklistRes.json());
       setError("");
@@ -169,7 +181,6 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
   }, []);
 
   const skippedLogs = logs.filter((l) => l.type === "skipped");
-  const forwardedLogs = logs.filter((l) => l.type === "forwarded" || l.type === "replied");
   const totalSkipped = stats
     ? stats.skipped_verified.total + stats.skipped_high_followers.total + stats.skipped_blocklisted.total
     : 0;
@@ -182,7 +193,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
       <header style={styles.topBar}>
         <div style={styles.topBarInner}>
           <img src="/logo.png" alt="BootInk" style={styles.topBarLogo} />
-          <span style={styles.topBarTitle}>Instagram-HubSpot Filtered Bridge</span>
+          <span style={styles.topBarTitle}>Instagram DM Manager</span>
           <button onClick={onLogout} style={styles.logoutBtn}>
             Log out
           </button>
@@ -198,6 +209,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
           <MetaConnection connection={metaConnection} onRefresh={fetchData} />
           <WebhookSubscriptions />
           <FilterSettings settings={filterSettings} onUpdate={fetchData} />
+          <AgentSettings settings={agentSettings} onUpdate={fetchData} />
 
           {/* Blocklist section */}
           <div style={styles.blocklistSection}>
@@ -237,26 +249,6 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
 
         {/* Right column — monitoring */}
         <div style={styles.rightCol}>
-          {health && (
-            <div style={styles.statusBar}>
-              <span
-                style={{
-                  ...styles.statusDot,
-                  background: health.pipeline_active ? "#4caf50" : "#f44336",
-                }}
-              />
-              <span>
-                Pipeline {health.pipeline_active ? "Active" : "Inactive"}
-              </span>
-              {!health.has_hubspot_token && (
-                <span style={styles.statusDetail}>Missing HubSpot token</span>
-              )}
-              {!health.has_channel_id && (
-                <span style={styles.statusDetail}>Missing channel ID</span>
-              )}
-            </div>
-          )}
-
           {stats && (
             <div style={styles.grid}>
               <StatCard
@@ -266,7 +258,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                 color="#ff9800"
               />
               <StatCard
-                label="Forwarded"
+                label="Approved"
                 total={stats.forwarded.total}
                 today={stats.forwarded.today}
                 color="#2196f3"
@@ -298,10 +290,10 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
             </div>
           )}
 
-          {/* Tabbed log section */}
+          {/* Tabbed section */}
           <div style={styles.logSection}>
             <div style={styles.tabBar}>
-              {(["pending", "skipped", "forwarded"] as LogTab[]).map((tab) => (
+              {(["pending", "skipped", "conversations"] as LogTab[]).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -380,22 +372,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                 )
               )}
 
-              {activeTab === "forwarded" && (
-                forwardedLogs.length === 0 ? (
-                  <div style={styles.logEmpty}>No forwarded messages</div>
-                ) : (
-                  [...forwardedLogs].reverse().map((entry, i) => (
-                    <div key={i} style={styles.logEntry}>
-                      <span style={{ ...styles.logBadge, background: logColors[entry.type] }}>
-                        {entry.type}
-                      </span>
-                      <span style={styles.logMessage}>{entry.message}</span>
-                      <span style={styles.logTime}>
-                        {formatTime(entry.timestamp)}
-                      </span>
-                    </div>
-                  ))
-                )
+              {activeTab === "conversations" && (
+                <Conversations />
               )}
             </div>
           </div>
@@ -562,29 +540,6 @@ const styles: Record<string, React.CSSProperties> = {
     minWidth: 0,
   },
   error: { color: "#d32f2f", fontSize: "0.875rem" },
-  statusBar: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.5rem",
-    padding: "0.75rem 1rem",
-    background: "#fff",
-    borderRadius: "6px",
-    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-    marginBottom: "1.5rem",
-    fontSize: "0.95rem",
-  },
-  statusDot: {
-    width: "10px",
-    height: "10px",
-    borderRadius: "50%",
-    display: "inline-block",
-    flexShrink: 0,
-  },
-  statusDetail: {
-    fontSize: "0.8rem",
-    color: "#999",
-    marginLeft: "0.5rem",
-  },
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
@@ -637,8 +592,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#fff",
     borderRadius: "0 6px 6px 6px",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-    maxHeight: "420px",
-    overflowY: "auto" as const,
+    minHeight: "200px",
   },
   logEntry: {
     display: "flex",

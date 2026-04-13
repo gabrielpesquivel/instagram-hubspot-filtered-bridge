@@ -11,10 +11,8 @@ export interface Env {
   INSTAGRAM_PAGE_ID: string;
   WEBHOOK_VERIFY_TOKEN: string;
 
-  // HubSpot OAuth (Public App)
-  HUBSPOT_CLIENT_ID: string;
-  HUBSPOT_CLIENT_SECRET: string;
-  HUBSPOT_CUSTOM_CHANNEL_ID: string;
+  // Gemini AI
+  GEMINI_API_KEY: string;
 
   // Configuration
   FILTER_MIN_FOLLOWERS: string;
@@ -78,20 +76,27 @@ export interface FilterResult {
   reason: "verified" | "high_followers" | "blocklisted" | "forward";
 }
 
-// HubSpot Custom Channel Message
-export interface HubSpotIncomingMessage {
-  messageDirection: "INCOMING";
+// Conversation types
+export interface ConversationMessage {
+  id: string;
+  sender: "user" | "agent";
   text: string;
-  richText?: string;
-  integrationThreadId: string;
-  channelAccountId: string;
-  senders: HubSpotSender[];
+  timestamp: string;
 }
 
-export interface HubSpotSender {
-  deliveryIdentifier: {
-    type: "CHANNEL_SPECIFIC_OPAQUE_ID";
-    value: string;
-  };
-  name: string;
+export interface Conversation {
+  senderId: string;
+  senderUsername: string;
+  messages: ConversationMessage[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationSummary {
+  senderId: string;
+  senderUsername: string;
+  lastMessageSnippet: string;
+  lastMessageAt: string;
+  unread: boolean;
+  status: "active" | "archived";
 }

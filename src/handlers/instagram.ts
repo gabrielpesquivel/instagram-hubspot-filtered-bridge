@@ -6,6 +6,7 @@ import { shouldForwardMessage } from "../services/filter";
 import { addPendingMessage } from "../services/pending";
 import { incrementStat, appendLog } from "../services/stats";
 import { clog, cerr } from "../services/logger";
+import { addMessageToConversation, getConversation } from "../services/conversations";
 
 /**
  * Handle Instagram webhook verification (GET request)
@@ -97,13 +98,23 @@ async function processMessage(
 
   const senderId = sender.id;
 
-  // Detect echo messages (sent BY the business account, not from a customer)
+  // Detect echo messages (sent BY the business account)
+  // Capture in conversation as agent message
   if (message.is_echo) {
-    await clog(env, `Echo message detected (sent by business account to ${messaging.recipient.id})`);
+    const recipientId = messaging.recipient.id;
+    const text = message.text || "";
+    await clog(env, `Echo message detected (sent by business account to ${recipientId})`);
+
+    // Add to conversation if one exists
+    const existingConv = await getConversation(recipientId, env);
+    if (existingConv && text) {
+      await addMessageToConversation(recipientId, existingConv.senderUsername, text, "agent", env);
+    }
+
     await incrementStat("replied", env);
     await appendLog({
       type: "replied",
-      message: `Sent to ${messaging.recipient.id} — "${(message.text || "").slice(0, 80)}"`,
+      message: `Sent to ${recipientId} — "${text.slice(0, 80)}"`,
     }, env);
     return;
   }
@@ -152,11 +163,30 @@ async function processMessage(
 
     const hasMedia = !!(message.attachments && message.attachments.length > 0);
     const messageText = message.text || (hasMedia ? "[media]" : "");
+    const senderUsername = profile.username || senderId;
+
+    // Check if sender has existing active conversation + auto-approve toggle
+    const existingConv = await getConversation(senderId, env);
+    const filterRaw = await env.PROFILE_CACHE.get("filter_settings");
+    const filterSettings = filterRaw ? JSON.parse(filterRaw) : {};
+    const autoApprove = filterSettings.auto_approve_known === true;
+
+    if (existingConv && autoApprove) {
+      // Auto-approve: add directly to conversation, skip pending queue
+      await addMessageToConversation(senderId, senderUsername, messageText, "user", env);
+      await clog(env, `Auto-approved message from ${senderId} (existing conversation)`);
+      await incrementStat("forwarded", env);
+      await appendLog({
+        type: "forwarded",
+        message: `${senderLabel} — "${messageText.slice(0, 80)}" (auto)`,
+      }, env);
+      return;
+    }
 
     // Add to pending queue for manual approval
     await addPendingMessage({
       senderId,
-      senderUsername: profile.username || senderId,
+      senderUsername,
       followerCount: profile.follower_count,
       isVerified: profile.is_verified,
       messageText,
