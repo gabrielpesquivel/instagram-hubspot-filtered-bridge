@@ -88,12 +88,17 @@ export async function generateReply(
   let contents: { role: string; parts: { text: string }[] }[] = [];
   for (const m of messages) {
     const role = m.sender === "user" ? "user" : "model";
+    // Include translation as context so Gemini understands non-English messages
+    let text = m.text;
+    if (m.translation && m.sender === "user") {
+      text = `${m.text}\n[English translation: ${m.translation}]`;
+    }
     const last = contents[contents.length - 1];
     if (last && last.role === role) {
       // Merge consecutive same-role messages
-      last.parts[0].text += "\n" + m.text;
+      last.parts[0].text += "\n" + text;
     } else {
-      contents.push({ role, parts: [{ text: m.text }] });
+      contents.push({ role, parts: [{ text }] });
     }
   }
   // Must start with user
