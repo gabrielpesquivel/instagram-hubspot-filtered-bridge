@@ -85,9 +85,14 @@ export async function generateReply(
 ): Promise<string> {
   const settings = await getGeminiSettings(env);
 
+  // Limit context to prevent overflow — keep most recent messages
+  const recentMessages = messages.length > MAX_CONTEXT_MESSAGES
+    ? messages.slice(-MAX_CONTEXT_MESSAGES)
+    : messages;
+
   // Gemini requires contents to start with "user" role and alternate roles
   let contents: { role: string; parts: { text: string }[] }[] = [];
-  for (const m of messages) {
+  for (const m of recentMessages) {
     const role = m.sender === "user" ? "user" : "model";
     // Include translation as context so Gemini understands non-English messages
     let text = m.text;
