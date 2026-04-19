@@ -127,11 +127,26 @@ async function processMessage(
   // Also check sender ID against our own page ID as a fallback
   const ownPageId = await getInstagramPageId(env);
   if (senderId === ownPageId) {
+    const recipientIdFallback = messaging.recipient.id;
+    const text = message.text || "";
     await clog(env, `Outgoing message detected from own page ID ${senderId}`);
+
+    // Store in conversation so AI has full context
+    if (text) {
+      const existingConvFallback = await getConversation(recipientIdFallback, env);
+      if (existingConvFallback) {
+        const lastMsg = existingConvFallback.messages[existingConvFallback.messages.length - 1];
+        const isDuplicate = lastMsg && lastMsg.sender === "agent" && lastMsg.text === text;
+        if (!isDuplicate) {
+          await addMessageToConversation(recipientIdFallback, existingConvFallback.senderUsername, text, "agent", env);
+        }
+      }
+    }
+
     await incrementStat("replied", env);
     await appendLog({
       type: "replied",
-      message: `Sent to ${messaging.recipient.id} — "${(message.text || "").slice(0, 80)}"`,
+      message: `Sent to ${recipientIdFallback} — "${(message.text || "").slice(0, 80)}"`,
     }, env);
     return;
   }
