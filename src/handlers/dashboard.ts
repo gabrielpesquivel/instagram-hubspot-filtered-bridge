@@ -151,9 +151,11 @@ export async function handleApprovePending(
     return jsonResponse({ error: "Message not found" }, 404);
   }
 
-  // Collect this message + all other pending messages from same sender
+  // Collect this message + all other pending messages from same sender, sorted chronologically
   const otherPending = await removePendingBySender(removed.senderId, env);
-  const allMessages = [removed, ...otherPending];
+  const allMessages = [removed, ...otherPending].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
 
   const senderLabel = removed.senderUsername.startsWith("@")
     ? removed.senderUsername
