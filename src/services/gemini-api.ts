@@ -2,6 +2,7 @@ import type { Env, ConversationMessage } from "../types";
 
 const GEMINI_SETTINGS_KEY = "gemini_settings";
 const DEFAULT_MODEL = "gemini-2.5-flash";
+const MAX_CONTEXT_MESSAGES = 30;
 
 const SYSTEM_PROMPT = `About BootInk:
 BootInk creates custom transfers for personalising football boots — flags, names, numbers, symbols, and emojis. Over 11,000 happy customers. Based in Australia. Each order comes with alcohol towels for application.
