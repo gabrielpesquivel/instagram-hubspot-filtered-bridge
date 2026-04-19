@@ -129,7 +129,7 @@ export async function generateReply(
       contents,
       generationConfig: {
         maxOutputTokens: 300,
-        temperature: 0.7,
+        temperature: 0.3,
       },
     }),
   });
