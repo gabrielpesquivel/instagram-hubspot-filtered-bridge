@@ -100,6 +100,18 @@ async function processMessage(
 
   const senderId = sender.id;
 
+  // Deduplicate by Instagram message ID to prevent webhook retry duplicates
+  if (message.mid) {
+    const dedupKey = `msg_seen:${message.mid}`;
+    const alreadySeen = await env.PROFILE_CACHE.get(dedupKey);
+    if (alreadySeen) {
+      await clog(env, `Duplicate message ${message.mid} — skipping`);
+      return;
+    }
+    // Mark as seen with 1-hour TTL (webhook retries happen within minutes)
+    await env.PROFILE_CACHE.put(dedupKey, "1", { expirationTtl: 3600 });
+  }
+
   // Detect echo messages (sent BY the business account)
   // Only store if not already captured by our reply handler (avoids duplicates)
   if (message.is_echo) {
