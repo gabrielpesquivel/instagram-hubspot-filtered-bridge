@@ -1,4 +1,4 @@
-import type { Env, InstagramWebhookPayload, InstagramMessaging } from "../types";
+import type { Env, InstagramWebhookPayload, InstagramMessaging, ConversationMessage } from "../types";
 import { verifyWebhookSignatureBytes } from "../utils/crypto";
 import { getUserProfile } from "../services/instagram-api";
 import { getInstagramPageId } from "../services/facebook-oauth";
@@ -208,20 +208,25 @@ async function processMessage(
       // Auto-reply if enabled for this conversation
       if (existingConv.autoReply && env.GEMINI_API_KEY) {
         try {
-          // Re-fetch to get updated messages
-          const updatedConv = await getConversation(senderId, env);
-          if (updatedConv) {
-            const reply = await generateReply(updatedConv.messages, env);
-            const sent = await sendMessage(senderId, reply, env);
-            if (sent) {
-              await addMessageToConversation(senderId, senderUsername, reply, "agent", env);
-              await markConversationRead(senderId, env);
-              await incrementStat("replied", env);
-              await appendLog({
-                type: "replied",
-                message: `AI auto-reply to ${senderLabel} — "${reply.slice(0, 80)}"`,
-              }, env);
-            }
+          // Build messages from existing conv + new message (avoid KV re-fetch race)
+          const newMsg: ConversationMessage = {
+            id: crypto.randomUUID(),
+            sender: "user",
+            text: messageText,
+            ...(translation ? { translation } : {}),
+            timestamp: new Date().toISOString(),
+          };
+          const messagesForReply = [...existingConv.messages, newMsg];
+          const reply = await generateReply(messagesForReply, env);
+          const sent = await sendMessage(senderId, reply, env);
+          if (sent) {
+            await addMessageToConversation(senderId, senderUsername, reply, "agent", env);
+            await markConversationRead(senderId, env);
+            await incrementStat("replied", env);
+            await appendLog({
+              type: "replied",
+              message: `AI auto-reply to ${senderLabel} — "${reply.slice(0, 80)}"`,
+            }, env);
           }
         } catch (error) {
           await cerr(env, `Auto-reply failed for ${senderId}:`, error);
