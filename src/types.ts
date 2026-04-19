@@ -21,6 +21,7 @@ export interface Env {
   // Dashboard
   ASSETS: Fetcher;
   DASHBOARD_PASSWORD: string;
+  META_ADMIN_PASSWORD: string;
 }
 
 // Instagram Webhook Payload

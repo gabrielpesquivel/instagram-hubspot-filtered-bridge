@@ -24,7 +24,7 @@ export async function handleLogin(
   const username = body.username?.trim().toLowerCase() ?? "admin";
   const validCredentials =
     (username === "admin" && body.password === env.DASHBOARD_PASSWORD) ||
-    (username === "metaadmin" && body.password === "meta2026");
+    (username === "metaadmin" && !!env.META_ADMIN_PASSWORD && body.password === env.META_ADMIN_PASSWORD);
 
   if (!body.password || !validCredentials) {
     return jsonResponse({ error: "Invalid password" }, 401);

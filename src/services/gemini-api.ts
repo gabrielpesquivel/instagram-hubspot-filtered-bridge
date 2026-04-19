@@ -119,11 +119,14 @@ export async function generateReply(
     contents.push({ role: "user", parts: [{ text: "(The customer is waiting for a response. Reply to their last message.)" }] });
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=${env.GEMINI_API_KEY}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent`;
 
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": env.GEMINI_API_KEY,
+    },
     body: JSON.stringify({
       system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
       contents,
@@ -160,11 +163,14 @@ export async function translateMessage(
   env: Env
 ): Promise<string | null> {
   const settings = await getGeminiSettings(env);
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=${env.GEMINI_API_KEY}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent`;
 
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": env.GEMINI_API_KEY,
+    },
     body: JSON.stringify({
       system_instruction: { parts: [{ text: "If the text is not in English, translate it to English. Reply with ONLY the translation, nothing else. If it is already in English, reply with exactly: ALREADY_ENGLISH" }] },
       contents: [{ role: "user", parts: [{ text }] }],
