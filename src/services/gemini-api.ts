@@ -131,7 +131,7 @@ export async function generateReply(
       system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
       contents,
       generationConfig: {
-        maxOutputTokens: 300,
+        maxOutputTokens: 2048,
         temperature: 0.3,
       },
     }),
