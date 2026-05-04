@@ -18,6 +18,14 @@ import {
 } from "../services/gemini-api";
 import { incrementStat, appendLog } from "../services/stats";
 
+const WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function isWindowExpired(messages: { sender: string; timestamp: string }[]): boolean {
+  const lastUserMsg = [...messages].reverse().find((m) => m.sender === "user");
+  if (!lastUserMsg) return true;
+  return Date.now() - new Date(lastUserMsg.timestamp).getTime() > WINDOW_MS;
+}
+
 export async function handleGetConversations(
   request: Request,
   env: Env
@@ -42,7 +50,7 @@ export async function handleGetConversation(
     return jsonResponse({ error: "Conversation not found" }, 404);
   }
   await markConversationRead(senderId, env);
-  return jsonResponse(conv);
+  return jsonResponse({ ...conv, windowExpired: isWindowExpired(conv.messages) });
 }
 
 export async function handleReplyConversation(
@@ -67,8 +75,12 @@ export async function handleReplyConversation(
 
   const text = body.text.trim();
 
+  // Check if 24h window expired — use HUMAN_AGENT tag if so
+  const conv0 = await getConversation(senderId, env);
+  const expired = conv0 ? isWindowExpired(conv0.messages) : false;
+
   // Send via Instagram
-  const sent = await sendMessage(senderId, text, env);
+  const sent = await sendMessage(senderId, text, env, { humanAgent: expired });
   if (!sent) {
     return jsonResponse({ error: "Failed to send message via Instagram" }, 500);
   }
@@ -103,6 +115,10 @@ export async function handleGenerateAndSendReply(
   const conv = await getConversation(senderId, env);
   if (!conv || conv.messages.length === 0) {
     return jsonResponse({ error: "No messages to generate reply for" }, 400);
+  }
+
+  if (isWindowExpired(conv.messages)) {
+    return jsonResponse({ error: "24h window expired — AI replies not allowed, use manual reply (Human Agent tag)" }, 403);
   }
 
   try {

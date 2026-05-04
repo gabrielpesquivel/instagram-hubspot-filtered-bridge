@@ -11,6 +11,7 @@ export interface PendingMessage {
   messageText: string;
   hasMedia: boolean;
   timestamp: string;
+  language?: string;
 }
 
 export async function addPendingMessage(

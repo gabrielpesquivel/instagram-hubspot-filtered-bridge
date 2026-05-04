@@ -158,6 +158,26 @@ export async function clearAllConversations(env: Env): Promise<number> {
   return active.length;
 }
 
+export async function setConversationLanguage(
+  senderId: string,
+  language: string,
+  env: Env
+): Promise<void> {
+  const conv = await getConversation(senderId, env);
+  if (!conv) return;
+  conv.language = language;
+  await env.PROFILE_CACHE.put(convKey(senderId), JSON.stringify(conv));
+
+  // Update index
+  const raw = await env.PROFILE_CACHE.get(INDEX_KEY);
+  const index: ConversationSummary[] = raw ? JSON.parse(raw) : [];
+  const entry = index.find((s) => s.senderId === senderId);
+  if (entry) {
+    entry.language = language;
+    await env.PROFILE_CACHE.put(INDEX_KEY, JSON.stringify(index));
+  }
+}
+
 async function updateIndex(
   senderId: string,
   senderUsername: string,

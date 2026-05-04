@@ -91,6 +91,7 @@ export interface Conversation {
   senderUsername: string;
   messages: ConversationMessage[];
   autoReply: boolean;
+  language?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -102,5 +103,6 @@ export interface ConversationSummary {
   lastMessageAt: string;
   unread: boolean;
   autoReply: boolean;
+  language?: string;
   status: "active" | "archived";
 }

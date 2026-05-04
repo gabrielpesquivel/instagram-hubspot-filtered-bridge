@@ -62,6 +62,8 @@ interface PendingMessage {
   messageText: string;
   hasMedia: boolean;
   timestamp: string;
+  windowExpired?: boolean;
+  language?: string;
 }
 
 interface BlocklistEntry {
@@ -360,6 +362,12 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                     <div key={msg.id} style={styles.pendingEntry}>
                       <div style={styles.pendingTop}>
                         <span style={styles.pendingUser}>@{msg.senderUsername}</span>
+                        {msg.language && (
+                          <span style={styles.langBadge}>{msg.language}</span>
+                        )}
+                        {msg.windowExpired && (
+                          <span style={styles.expiredBadge}>24h expired</span>
+                        )}
                         {msg.followerCount != null && (
                           <span style={styles.pendingMeta}>
                             {msg.followerCount.toLocaleString()} followers
@@ -748,6 +756,22 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     fontSize: "0.75rem",
     fontWeight: 600,
+  },
+  langBadge: {
+    fontSize: "0.6rem",
+    fontWeight: 700,
+    background: "#e0e0e0",
+    color: "#555",
+    padding: "1px 5px",
+    borderRadius: "3px",
+  },
+  expiredBadge: {
+    fontSize: "0.6rem",
+    fontWeight: 700,
+    background: "#ff5722",
+    color: "#fff",
+    padding: "1px 5px",
+    borderRadius: "3px",
   },
   dismissBtn: {
     padding: "0.3rem 0.8rem",

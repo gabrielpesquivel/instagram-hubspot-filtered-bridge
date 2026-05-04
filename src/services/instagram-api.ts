@@ -145,7 +145,8 @@ async function fetchProfileFromApi(
 export async function sendMessage(
   recipientId: string,
   text: string,
-  env: Env
+  env: Env,
+  options?: { humanAgent?: boolean }
 ): Promise<boolean> {
   const [pageId, accessToken] = await Promise.all([
     getFacebookPageId(env),
@@ -153,10 +154,15 @@ export async function sendMessage(
   ]);
   const url = `${GRAPH_API_BASE}/${pageId}/messages`;
 
-  const body = {
+  const body: Record<string, unknown> = {
     recipient: { id: recipientId },
     message: { text },
   };
+
+  if (options?.humanAgent) {
+    body.messaging_type = "MESSAGE_TAG";
+    body.tag = "HUMAN_AGENT";
+  }
 
   try {
     const response = await fetch(url, {

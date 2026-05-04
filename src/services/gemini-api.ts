@@ -158,6 +158,41 @@ export async function generateReply(
   return text;
 }
 
+export async function detectLanguage(
+  text: string,
+  env: Env
+): Promise<string | null> {
+  const settings = await getGeminiSettings(env);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent`;
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": env.GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: "Detect the language of the text. Reply with ONLY the ISO 639-1 two-letter language code in uppercase (e.g. EN, ES, AR, FR, DE, PT, ZH, JA, KO). Nothing else." }] },
+        contents: [{ role: "user", parts: [{ text }] }],
+        generationConfig: { maxOutputTokens: 4, temperature: 0 },
+      }),
+    });
+
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+
+    const result = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toUpperCase();
+    if (!result || result.length > 5) return null;
+    return result;
+  } catch {
+    return null;
+  }
+}
+
 export async function translateMessage(
   text: string,
   env: Env

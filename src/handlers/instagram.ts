@@ -6,8 +6,8 @@ import { shouldForwardMessage } from "../services/filter";
 import { addPendingMessage } from "../services/pending";
 import { incrementStat, appendLog } from "../services/stats";
 import { clog, cerr } from "../services/logger";
-import { addMessageToConversation, getConversation, markConversationRead } from "../services/conversations";
-import { generateReply, translateMessage } from "../services/gemini-api";
+import { addMessageToConversation, getConversation, markConversationRead, setConversationLanguage } from "../services/conversations";
+import { generateReply, translateMessage, detectLanguage } from "../services/gemini-api";
 import { sendMessage } from "../services/instagram-api";
 
 /**
@@ -210,6 +210,13 @@ async function processMessage(
         translation = (await translateMessage(messageText, env)) ?? undefined;
       }
       await addMessageToConversation(senderId, senderUsername, messageText, "user", env, translation);
+
+      // Detect and store language if not already set
+      if (!existingConv.language && env.GEMINI_API_KEY && messageText && messageText !== "[media]") {
+        const lang = await detectLanguage(messageText, env);
+        if (lang) await setConversationLanguage(senderId, lang, env);
+      }
+
       await clog(env, `Auto-approved message from ${senderId} (existing conversation)`);
       await incrementStat("forwarded", env);
       await appendLog({
@@ -247,6 +254,12 @@ async function processMessage(
       return;
     }
 
+    // Detect language for display
+    let language: string | undefined;
+    if (env.GEMINI_API_KEY && messageText && messageText !== "[media]") {
+      language = (await detectLanguage(messageText, env)) ?? undefined;
+    }
+
     // Add to pending queue for manual approval
     await addPendingMessage({
       senderId,
@@ -255,6 +268,7 @@ async function processMessage(
       isVerified: profile.is_verified,
       messageText,
       hasMedia,
+      language,
     }, env);
     await clog(env, `Added message from ${senderId} to pending queue`);
     await incrementStat("pending", env);

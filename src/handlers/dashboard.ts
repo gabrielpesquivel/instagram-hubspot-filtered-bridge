@@ -5,7 +5,7 @@ import { getConnection } from "../services/facebook-oauth";
 import { getCookie, isAuthenticated, jsonResponse } from "../utils/auth";
 import { getPendingMessages, removePendingMessage, removePendingBySender } from "../services/pending";
 import { getBlocklist, addToBlocklist, removeFromBlocklist } from "../services/blocklist";
-import { addMessageToConversation } from "../services/conversations";
+import { addMessageToConversation, setConversationLanguage } from "../services/conversations";
 import { translateMessage } from "../services/gemini-api";
 
 const SESSION_TTL = 24 * 60 * 60; // 24 hours in seconds
@@ -124,7 +124,12 @@ export async function handleGetPending(
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
   const messages = await getPendingMessages(env);
-  return jsonResponse(messages);
+  const WINDOW_MS = 24 * 60 * 60 * 1000;
+  const enriched = messages.map((m) => ({
+    ...m,
+    windowExpired: Date.now() - new Date(m.timestamp).getTime() > WINDOW_MS,
+  }));
+  return jsonResponse(enriched);
 }
 
 export async function handleApprovePending(
@@ -161,6 +166,9 @@ export async function handleApprovePending(
     ? removed.senderUsername
     : `@${removed.senderUsername}`;
 
+  // Carry language from first pending message with a detected language
+  const detectedLang = allMessages.find((m) => m.language)?.language;
+
   for (const msg of allMessages) {
     let translation: string | undefined;
     if (env.GEMINI_API_KEY) {
@@ -179,6 +187,10 @@ export async function handleApprovePending(
       type: "forwarded",
       message: `${senderLabel} — "${msg.messageText.slice(0, 80)}"`,
     }, env);
+  }
+
+  if (detectedLang) {
+    await setConversationLanguage(removed.senderId, detectedLang, env);
   }
 
   return jsonResponse({ ok: true, forwarded: allMessages.length });
@@ -214,6 +226,8 @@ export async function handleApproveAllPending(
       ? sorted[0].senderUsername
       : `@${sorted[0].senderUsername}`;
 
+    const detectedLang = sorted.find((m) => m.language)?.language;
+
     for (const msg of sorted) {
       let translation: string | undefined;
       if (env.GEMINI_API_KEY) {
@@ -233,6 +247,10 @@ export async function handleApproveAllPending(
         message: `${senderLabel} — "${msg.messageText.slice(0, 80)}"`,
       }, env);
       totalForwarded++;
+    }
+
+    if (detectedLang) {
+      await setConversationLanguage(senderId, detectedLang, env);
     }
   }
 

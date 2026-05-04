@@ -7,6 +7,7 @@ interface ConversationSummary {
   lastMessageAt: string;
   unread: boolean;
   autoReply?: boolean;
+  language?: string;
   status: string;
 }
 
@@ -23,6 +24,8 @@ interface ConversationFull {
   senderUsername: string;
   messages: ConversationMessage[];
   autoReply: boolean;
+  windowExpired?: boolean;
+  language?: string;
 }
 
 export function Conversations() {
@@ -30,7 +33,9 @@ export function Conversations() {
   const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [selectedUsername, setSelectedUsername] = useState("");
+  const [selectedLanguage, setSelectedLanguage] = useState("");
   const [autoReply, setAutoReply] = useState(false);
+  const [windowExpired, setWindowExpired] = useState(false);
   const [replyText, setReplyText] = useState("");
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -53,7 +58,9 @@ export function Conversations() {
         const data: ConversationFull = await res.json();
         setMessages(data.messages);
         setSelectedUsername(data.senderUsername);
+        setSelectedLanguage(data.language ?? "");
         setAutoReply(data.autoReply ?? false);
+        setWindowExpired(data.windowExpired ?? false);
       }
     } catch { /* ignore */ }
     finally {
@@ -239,6 +246,7 @@ export function Conversations() {
               <div style={styles.convTop}>
                 <span style={styles.convUser}>
                   @{c.senderUsername}
+                  {c.language && <span style={styles.langBadge}>{c.language}</span>}
                   {c.autoReply && <span style={styles.autoReplyBadge}>AI</span>}
                 </span>
                 <span style={styles.convTime}>{formatTime(c.lastMessageAt)}</span>
@@ -257,7 +265,10 @@ export function Conversations() {
         ) : (
           <>
             <div style={styles.messageHeader}>
-              <span style={styles.messageHeaderUser}>@{selectedUsername}</span>
+              <span style={styles.messageHeaderUser}>
+                @{selectedUsername}
+                {selectedLanguage && <span style={styles.langBadgeHeader}>{selectedLanguage}</span>}
+              </span>
               <div style={styles.headerActions}>
                 <button
                   onClick={handleToggleAutoReply}
@@ -322,16 +333,21 @@ export function Conversations() {
                 }}
               />
               <div style={styles.replyButtons}>
+                {windowExpired && (
+                  <span style={styles.windowExpiredNote}>24h expired — Human Agent tag will be used</span>
+                )}
                 {generateError && (
                   <span style={styles.generateError}>{generateError}</span>
                 )}
-                <button
-                  onClick={handleGenerate}
-                  disabled={generating}
-                  style={styles.generateBtn}
-                >
-                  {generating ? "Sending..." : "AI Reply"}
-                </button>
+                {!windowExpired && (
+                  <button
+                    onClick={handleGenerate}
+                    disabled={generating}
+                    style={styles.generateBtn}
+                  >
+                    {generating ? "Sending..." : "AI Reply"}
+                  </button>
+                )}
                 <button
                   onClick={handleSend}
                   disabled={sending || !replyText.trim()}
@@ -427,6 +443,23 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap" as const,
+  },
+  langBadge: {
+    fontSize: "0.55rem",
+    fontWeight: 700,
+    background: "#e0e0e0",
+    color: "#555",
+    padding: "1px 4px",
+    borderRadius: "3px",
+  },
+  langBadgeHeader: {
+    fontSize: "0.65rem",
+    fontWeight: 600,
+    background: "#e0e0e0",
+    color: "#555",
+    padding: "1px 5px",
+    borderRadius: "3px",
+    marginLeft: "6px",
   },
   autoReplyBadge: {
     fontSize: "0.55rem",
@@ -596,6 +629,12 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: "0.5rem",
     justifyContent: "flex-end",
     alignItems: "center",
+  },
+  windowExpiredNote: {
+    fontSize: "0.7rem",
+    color: "#ff5722",
+    fontWeight: 600,
+    flex: 1,
   },
   generateError: {
     fontSize: "0.72rem",
