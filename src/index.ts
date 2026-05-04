@@ -9,8 +9,10 @@ import {
   handleHealth,
   handleGetPending,
   handleApprovePending,
+  handleApproveAllPending,
   handleRejectPending,
   handleDismissPending,
+  handleDismissAllPending,
   handleAddBlock,
   handleGetBlocklist,
   handleUnblock,
@@ -23,6 +25,7 @@ import {
   handleArchiveConversation,
   handleSetAutoReply,
   handleDeleteMessage,
+  handleClearAllConversations,
   handleGetAgentSettings,
   handleUpdateAgentSettings,
 } from "./handlers/conversations";
@@ -72,11 +75,17 @@ export default {
     if (path === "/api/pending/approve" && request.method === "POST") {
       return handleApprovePending(request, env);
     }
+    if (path === "/api/pending/approve-all" && request.method === "POST") {
+      return handleApproveAllPending(request, env);
+    }
     if (path === "/api/pending/reject" && request.method === "POST") {
       return handleRejectPending(request, env);
     }
     if (path === "/api/pending/dismiss" && request.method === "POST") {
       return handleDismissPending(request, env);
+    }
+    if (path === "/api/pending/dismiss-all" && request.method === "POST") {
+      return handleDismissAllPending(request, env);
     }
 
     // Blocklist
@@ -93,6 +102,9 @@ export default {
     // Conversations API
     if (path === "/api/conversations" && request.method === "GET") {
       return handleGetConversations(request, env);
+    }
+    if (path === "/api/conversations/clear-all" && request.method === "POST") {
+      return handleClearAllConversations(request, env);
     }
 
     // Delete message route: /api/conversations/:senderId/messages/:messageId

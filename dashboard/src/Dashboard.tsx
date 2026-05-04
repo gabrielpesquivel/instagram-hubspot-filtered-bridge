@@ -169,6 +169,28 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     }).then(() => fetchData());
   }
 
+  async function handleApproveAll() {
+    if (pendingMessages.length === 0) return;
+    if (!confirm(`Approve all ${pendingMessages.length} pending messages?`)) return;
+    setPendingMessages([]);
+    await fetch("/api/pending/approve-all", { method: "POST" });
+    fetchData();
+  }
+
+  async function handleDismissAll() {
+    if (pendingMessages.length === 0) return;
+    if (!confirm(`Dismiss all ${pendingMessages.length} pending messages?`)) return;
+    setPendingMessages([]);
+    await fetch("/api/pending/dismiss-all", { method: "POST" });
+    fetchData();
+  }
+
+  async function handleClearAllConversations() {
+    if (!confirm("Clear ALL conversations? This cannot be undone.")) return;
+    await fetch("/api/conversations/clear-all", { method: "POST" });
+    fetchData();
+  }
+
   async function handleAddBlock() {
     const username = blockInput.trim().replace(/^@/, "");
     if (!username) return;
@@ -322,7 +344,19 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                 pendingMessages.length === 0 ? (
                   <div style={styles.logEmpty}>No pending messages</div>
                 ) : (
-                  [...pendingMessages].reverse().map((msg) => (
+                  <>
+                  <div style={styles.bulkActions}>
+                    <button onClick={handleApproveAll} style={styles.approveAllBtn}>
+                      Accept All ({pendingMessages.length})
+                    </button>
+                    <button onClick={handleDismissAll} style={styles.clearAllBtn}>
+                      Dismiss All
+                    </button>
+                    <button onClick={handleClearAllConversations} style={styles.clearAllBtn}>
+                      Clear Conversations
+                    </button>
+                  </div>
+                  {[...pendingMessages].reverse().map((msg) => (
                     <div key={msg.id} style={styles.pendingEntry}>
                       <div style={styles.pendingTop}>
                         <span style={styles.pendingUser}>@{msg.senderUsername}</span>
@@ -357,7 +391,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                         </button>
                       </div>
                     </div>
-                  ))
+                  ))}
+                  </>
                 )
               )}
 
@@ -637,6 +672,33 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center" as const,
     color: "#999",
     fontSize: "0.9rem",
+  },
+  bulkActions: {
+    padding: "0.5rem 1rem",
+    borderBottom: "1px solid #f0f0f0",
+    display: "flex",
+    gap: "0.5rem",
+  },
+  approveAllBtn: {
+    padding: "0.35rem 0.8rem",
+    background: "#4caf50",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "0.75rem",
+    fontWeight: 600,
+  },
+  clearAllBtn: {
+    padding: "0.35rem 0.8rem",
+    background: "#f44336",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "0.75rem",
+    fontWeight: 600,
+    marginLeft: "auto",
   },
   pendingEntry: {
     padding: "0.75rem 1rem",

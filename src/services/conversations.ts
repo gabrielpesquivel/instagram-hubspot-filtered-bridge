@@ -141,6 +141,23 @@ export async function setAutoReply(
   return true;
 }
 
+export async function clearAllConversations(env: Env): Promise<number> {
+  const raw = await env.PROFILE_CACHE.get(INDEX_KEY);
+  const index: ConversationSummary[] = raw ? JSON.parse(raw) : [];
+  const active = index.filter((s) => s.status === "active");
+
+  // Delete each conversation object
+  for (const entry of active) {
+    await env.PROFILE_CACHE.delete(convKey(entry.senderId));
+  }
+
+  // Remove active entries from index
+  const remaining = index.filter((s) => s.status !== "active");
+  await env.PROFILE_CACHE.put(INDEX_KEY, JSON.stringify(remaining));
+
+  return active.length;
+}
+
 async function updateIndex(
   senderId: string,
   senderUsername: string,

@@ -184,6 +184,77 @@ export async function handleApprovePending(
   return jsonResponse({ ok: true, forwarded: allMessages.length });
 }
 
+export async function handleApproveAllPending(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  const messages = await getPendingMessages(env);
+  if (messages.length === 0) {
+    return jsonResponse({ ok: true, forwarded: 0 });
+  }
+
+  // Group by sender, sorted chronologically within each group
+  const bySender = new Map<string, typeof messages>();
+  for (const msg of messages) {
+    const list = bySender.get(msg.senderId) || [];
+    list.push(msg);
+    bySender.set(msg.senderId, list);
+  }
+
+  let totalForwarded = 0;
+  for (const [senderId, senderMessages] of bySender) {
+    const sorted = senderMessages.sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+    const senderLabel = sorted[0].senderUsername.startsWith("@")
+      ? sorted[0].senderUsername
+      : `@${sorted[0].senderUsername}`;
+
+    for (const msg of sorted) {
+      let translation: string | undefined;
+      if (env.GEMINI_API_KEY) {
+        translation = (await translateMessage(msg.messageText, env)) ?? undefined;
+      }
+      await addMessageToConversation(
+        msg.senderId,
+        msg.senderUsername,
+        msg.messageText,
+        "user",
+        env,
+        translation
+      );
+      await incrementStat("forwarded", env);
+      await appendLog({
+        type: "forwarded",
+        message: `${senderLabel} — "${msg.messageText.slice(0, 80)}"`,
+      }, env);
+      totalForwarded++;
+    }
+  }
+
+  // Clear pending queue
+  await env.PROFILE_CACHE.put("pending_messages", JSON.stringify([]));
+
+  return jsonResponse({ ok: true, forwarded: totalForwarded });
+}
+
+export async function handleDismissAllPending(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  const messages = await getPendingMessages(env);
+  await env.PROFILE_CACHE.put("pending_messages", JSON.stringify([]));
+  return jsonResponse({ ok: true, dismissed: messages.length });
+}
+
 export async function handleDismissPending(
   request: Request,
   env: Env

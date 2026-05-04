@@ -155,6 +155,14 @@ export function Conversations() {
     fetchConversations();
   }
 
+  async function handleClearAll() {
+    if (!confirm("Clear ALL conversations? This cannot be undone.")) return;
+    await fetch("/api/conversations/clear-all", { method: "POST" });
+    setSelected(null);
+    setMessages([]);
+    fetchConversations();
+  }
+
   async function handleDeleteMessage(messageId: string) {
     if (!selected || deletingId) return;
     setDeletingId(messageId);
@@ -207,7 +215,14 @@ export function Conversations() {
     <div style={styles.container}>
       {/* Conversation list */}
       <div style={styles.list}>
-        <div style={styles.listHeader}>Conversations ({conversations.length})</div>
+        <div style={styles.listHeader}>
+          <span>Conversations ({conversations.length})</span>
+          {conversations.length > 0 && (
+            <button onClick={handleClearAll} style={styles.clearAllBtn}>
+              Clear All
+            </button>
+          )}
+        </div>
         {conversations.length === 0 ? (
           <div style={styles.empty}>No active conversations</div>
         ) : (
@@ -355,6 +370,19 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "0.85rem",
     borderBottom: "1px solid #f0f0f0",
     background: "#fafafa",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  clearAllBtn: {
+    padding: "0.2rem 0.5rem",
+    background: "#f44336",
+    color: "#fff",
+    border: "none",
+    borderRadius: "3px",
+    cursor: "pointer",
+    fontSize: "0.65rem",
+    fontWeight: 600,
   },
   empty: {
     padding: "2rem 1rem",

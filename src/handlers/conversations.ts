@@ -8,6 +8,7 @@ import {
   markConversationRead,
   setAutoReply,
   deleteMessage,
+  clearAllConversations,
 } from "../services/conversations";
 import { sendMessage } from "../services/instagram-api";
 import {
@@ -188,6 +189,18 @@ export async function handleDeleteMessage(
     return jsonResponse({ error: "Message not found" }, 404);
   }
   return jsonResponse({ ok: true });
+}
+
+export async function handleClearAllConversations(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  const count = await clearAllConversations(env);
+  return jsonResponse({ ok: true, cleared: count });
 }
 
 export async function handleGetAgentSettings(
