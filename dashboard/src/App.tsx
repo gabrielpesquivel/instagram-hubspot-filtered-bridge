@@ -3,11 +3,13 @@ import { Login } from "./Login";
 import { Dashboard } from "./Dashboard";
 import { ToolPicker } from "./ToolPicker";
 import { Gangsheet } from "./Gangsheet";
+import { DmManager } from "./DmManager";
 
-type Tool = "picker" | "bridge" | "gangsheet";
+type Tool = "picker" | "bridge" | "gangsheet" | "dms";
 
 function toolFromHash(): Tool {
   const hash = window.location.hash;
+  if (hash.startsWith("#/dms")) return "dms";
   if (hash.startsWith("#/bridge")) return "bridge";
   if (hash.startsWith("#/gangsheet")) return "gangsheet";
   return "picker";
@@ -45,6 +47,15 @@ export function App() {
   };
 
   if (tool === "bridge") return <Dashboard onLogout={logout} onBack={goPicker} />;
+  if (tool === "dms")
+    return (
+      <DmManager
+        onLogout={logout}
+        onBack={() => {
+          window.location.hash = "#/bridge";
+        }}
+      />
+    );
   if (tool === "gangsheet") return <Gangsheet onLogout={logout} onBack={goPicker} />;
   return (
     <ToolPicker

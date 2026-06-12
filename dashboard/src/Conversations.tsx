@@ -30,7 +30,7 @@ interface ConversationFull {
   language?: string;
 }
 
-export function Conversations() {
+export function Conversations({ fullPage = false }: { fullPage?: boolean } = {}) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
@@ -269,7 +269,7 @@ export function Conversations() {
   }
 
   return (
-    <div style={styles.container}>
+    <div style={{ ...styles.container, ...(fullPage ? styles.containerFull : {}) }}>
       {/* Conversation list */}
       <div style={styles.list}>
         <div style={styles.listHeader}>
@@ -447,11 +447,16 @@ const styles: Record<string, React.CSSProperties> = {
     height: "520px",
     overflow: "hidden",
   },
+  containerFull: {
+    height: "100%",
+    borderRadius: 0,
+    boxShadow: "none",
+  },
   list: {
-    width: "260px",
+    flex: 1,
+    minWidth: 0,
     borderRight: "1px solid #e0e0e0",
     overflowY: "auto",
-    flexShrink: 0,
   },
   listHeader: {
     padding: "0.75rem 1rem",

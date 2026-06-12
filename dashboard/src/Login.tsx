@@ -4,7 +4,6 @@ export function Login({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [hint, setHint] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
@@ -30,7 +29,6 @@ export function Login({ onLogin }: { onLogin: () => void }) {
         onLogin();
       } else {
         setError("Invalid password");
-        setHint("🐔 + 🍔");
       }
     } catch {
       setError("Connection failed");
@@ -60,7 +58,6 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           style={styles.input}
         />
         {error && <p style={styles.error}>{error}</p>}
-        {hint && <p style={styles.hint}>Hint: {hint}</p>}
         <button type="submit" disabled={loading} style={styles.button}>
           {loading ? "Logging in..." : "Log in"}
         </button>
@@ -123,13 +120,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#d32f2f",
     margin: 0,
     fontSize: "0.875rem",
-    textAlign: "center" as const,
-  },
-  hint: {
-    color: "#888",
-    margin: 0,
-    fontSize: "0.8rem",
-    fontStyle: "italic",
     textAlign: "center" as const,
   },
 };

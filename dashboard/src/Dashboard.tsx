@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { MetaConnection } from "./MetaConnection";
 import { FilterSettings } from "./FilterSettings";
 import { WebhookSubscriptions } from "./WebhookSubscriptions";
-import { Conversations } from "./Conversations";
 import { AgentSettings } from "./AgentSettings";
 import { Toaster, toast } from "./toast";
 
@@ -74,7 +73,7 @@ interface BlocklistEntry {
   blockedAt: string;
 }
 
-type LogTab = "pending" | "skipped" | "conversations";
+type LogTab = "pending" | "skipped";
 
 export function Dashboard({ onLogout, onBack }: { onLogout: () => void; onBack?: () => void }) {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -472,7 +471,7 @@ export function Dashboard({ onLogout, onBack }: { onLogout: () => void; onBack?:
           {/* Tabbed section */}
           <div style={styles.logSection}>
             <div style={styles.tabBar}>
-              {(["pending", "skipped", "conversations"] as LogTab[]).map((tab) => (
+              {(["pending", "skipped"] as LogTab[]).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -487,6 +486,13 @@ export function Dashboard({ onLogout, onBack }: { onLogout: () => void; onBack?:
                   )}
                 </button>
               ))}
+              <button
+                onClick={() => { window.location.hash = "#/dms"; }}
+                style={styles.convLaunchBtn}
+                title="Open the full-page DM manager"
+              >
+                Conversations →
+              </button>
             </div>
 
             <div style={styles.logContainer}>
@@ -597,10 +603,6 @@ export function Dashboard({ onLogout, onBack }: { onLogout: () => void; onBack?:
                     </div>
                   ))
                 )
-              )}
-
-              {activeTab === "conversations" && (
-                <Conversations />
               )}
             </div>
           </div>
@@ -761,13 +763,16 @@ const styles: Record<string, React.CSSProperties> = {
     flexWrap: "wrap" as const,
   },
   leftCol: {
-    width: "280px",
+    flexBasis: "calc(30% - 0.75rem)",
+    flexGrow: 0,
     flexShrink: 0,
-    flexGrow: 1,
+    minWidth: "280px",
     maxWidth: "100%",
   },
   rightCol: {
-    flex: 1,
+    flexBasis: "calc(70% - 0.75rem)",
+    flexGrow: 1,
+    flexShrink: 1,
     minWidth: 0,
   },
   error: { color: "#d32f2f", fontSize: "0.875rem" },
@@ -808,6 +813,18 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#fff",
     color: "#333",
     boxShadow: "0 -1px 4px rgba(0,0,0,0.06)",
+  },
+  convLaunchBtn: {
+    marginLeft: "auto",
+    alignSelf: "center",
+    padding: "0.5rem 1rem",
+    background: "#2196f3",
+    color: "#fff",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontSize: "0.85rem",
+    fontWeight: 600,
   },
   tabBadge: {
     background: "#ff9800",
