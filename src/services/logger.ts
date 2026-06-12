@@ -1,7 +1,5 @@
 import type { Env } from "../types";
-
-const CONSOLE_LOG_KEY = "console_logs";
-const MAX_ENTRIES = 100;
+import { getDMState } from "../dm-state";
 
 export interface ConsoleLogEntry {
   timestamp: string;
@@ -40,19 +38,12 @@ async function persist(
   env: Env
 ): Promise<void> {
   try {
-    const raw = await env.PROFILE_CACHE.get(CONSOLE_LOG_KEY);
-    const entries: ConsoleLogEntry[] = raw ? JSON.parse(raw) : [];
-    entries.push({ ...entry, timestamp: new Date().toISOString() });
-    await env.PROFILE_CACHE.put(
-      CONSOLE_LOG_KEY,
-      JSON.stringify(entries.slice(-MAX_ENTRIES))
-    );
+    await getDMState(env).appendConsoleLog(entry);
   } catch {
     // Don't let logging failures break the pipeline
   }
 }
 
 export async function getConsoleLogs(env: Env): Promise<ConsoleLogEntry[]> {
-  const raw = await env.PROFILE_CACHE.get(CONSOLE_LOG_KEY);
-  return raw ? JSON.parse(raw) : [];
+  return getDMState(env).getConsoleLogs();
 }

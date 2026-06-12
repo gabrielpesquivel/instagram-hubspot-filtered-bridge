@@ -3,12 +3,15 @@ import { getAllStats, getRecentLogs, incrementStat, appendLog } from "../service
 import { getConsoleLogs } from "../services/logger";
 import { getConnection } from "../services/facebook-oauth";
 import { getCookie, isAuthenticated, jsonResponse } from "../utils/auth";
-import { getPendingMessages, removePendingMessage, removePendingBySender } from "../services/pending";
+import { getPendingMessages, removePendingMessage, removePendingBySender, clearPendingMessages } from "../services/pending";
+import { sendMessage } from "../services/instagram-api";
 import { getBlocklist, addToBlocklist, removeFromBlocklist } from "../services/blocklist";
 import { addMessageToConversation, setConversationLanguage } from "../services/conversations";
 import { translateMessage } from "../services/gemini-api";
 
 const SESSION_TTL = 24 * 60 * 60; // 24 hours in seconds
+const LOGIN_MAX_ATTEMPTS = 10;
+const LOGIN_WINDOW_SECONDS = 15 * 60;
 
 export async function handleLogin(
   request: Request,
@@ -21,13 +24,28 @@ export async function handleLogin(
     return jsonResponse({ error: "Invalid JSON" }, 400);
   }
 
+  // Per-IP rate limit: 10 failed attempts per 15 minutes
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const rateKey = `login_fail:${ip}`;
+  const attempts = parseInt((await env.PROFILE_CACHE.get(rateKey)) || "0", 10);
+  if (attempts >= LOGIN_MAX_ATTEMPTS) {
+    return jsonResponse({ error: "Too many attempts — try again later" }, 429);
+  }
+
   const username = body.username?.trim().toLowerCase() ?? "admin";
   const validCredentials =
     (username === "admin" && body.password === env.DASHBOARD_PASSWORD) ||
     (username === "metaadmin" && !!env.META_ADMIN_PASSWORD && body.password === env.META_ADMIN_PASSWORD);
 
   if (!body.password || !validCredentials) {
+    await env.PROFILE_CACHE.put(rateKey, String(attempts + 1), {
+      expirationTtl: LOGIN_WINDOW_SECONDS,
+    });
     return jsonResponse({ error: "Invalid password" }, 401);
+  }
+
+  if (attempts > 0) {
+    await env.PROFILE_CACHE.delete(rateKey);
   }
 
   const token = crypto.randomUUID();
@@ -132,29 +150,17 @@ export async function handleGetPending(
   return jsonResponse(enriched);
 }
 
-export async function handleApprovePending(
-  request: Request,
+/**
+ * Core approve flow: remove the pending message (+ all others from the same
+ * sender) and forward them into the conversation. Returns sender info, or
+ * null if the pending id wasn't found.
+ */
+async function approvePendingCore(
+  id: string,
   env: Env
-): Promise<Response> {
-  if (!(await isAuthenticated(request, env))) {
-    return jsonResponse({ error: "Unauthorized" }, 401);
-  }
-
-  let body: { id?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return jsonResponse({ error: "Invalid JSON" }, 400);
-  }
-
-  if (!body.id) {
-    return jsonResponse({ error: "Missing id" }, 400);
-  }
-
-  const removed = await removePendingMessage(body.id, env);
-  if (!removed) {
-    return jsonResponse({ error: "Message not found" }, 404);
-  }
+): Promise<{ senderId: string; senderUsername: string; forwarded: number } | null> {
+  const removed = await removePendingMessage(id, env);
+  if (!removed) return null;
 
   // Collect this message + all other pending messages from same sender, sorted chronologically
   const otherPending = await removePendingBySender(removed.senderId, env);
@@ -193,7 +199,97 @@ export async function handleApprovePending(
     await setConversationLanguage(removed.senderId, detectedLang, env);
   }
 
-  return jsonResponse({ ok: true, forwarded: allMessages.length });
+  return {
+    senderId: removed.senderId,
+    senderUsername: removed.senderUsername,
+    forwarded: allMessages.length,
+  };
+}
+
+export async function handleApprovePending(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  let body: { id?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON" }, 400);
+  }
+
+  if (!body.id) {
+    return jsonResponse({ error: "Missing id" }, 400);
+  }
+
+  const result = await approvePendingCore(body.id, env);
+  if (!result) {
+    return jsonResponse({ error: "Message not found" }, 404);
+  }
+
+  return jsonResponse({ ok: true, forwarded: result.forwarded });
+}
+
+/**
+ * Approve a pending message AND send a reply in one step (inline reply from
+ * the pending queue card).
+ */
+export async function handleApproveAndReply(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  let body: { id?: string; text?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON" }, 400);
+  }
+
+  if (!body.id || !body.text?.trim()) {
+    return jsonResponse({ error: "Missing id or text" }, 400);
+  }
+
+  const result = await approvePendingCore(body.id, env);
+  if (!result) {
+    return jsonResponse({ error: "Message not found" }, 404);
+  }
+
+  const text = body.text.trim();
+  const sent = await sendMessage(result.senderId, text, env);
+  await addMessageToConversation(
+    result.senderId,
+    result.senderUsername,
+    text,
+    "agent",
+    env,
+    undefined,
+    sent ? "sent" : "failed"
+  );
+
+  if (sent) {
+    await incrementStat("replied", env);
+    await appendLog({
+      type: "replied",
+      message: `Reply to @${result.senderUsername} — "${text.slice(0, 80)}"`,
+    }, env);
+  } else {
+    await appendLog({
+      type: "error",
+      message: `Reply to @${result.senderUsername} failed to send — retry from conversation`,
+    }, env);
+  }
+
+  return jsonResponse(
+    { ok: sent, forwarded: result.forwarded, sent },
+    sent ? 200 : 502
+  );
 }
 
 export async function handleApproveAllPending(
@@ -255,7 +351,7 @@ export async function handleApproveAllPending(
   }
 
   // Clear pending queue
-  await env.PROFILE_CACHE.put("pending_messages", JSON.stringify([]));
+  await clearPendingMessages(env);
 
   return jsonResponse({ ok: true, forwarded: totalForwarded });
 }
@@ -268,9 +364,8 @@ export async function handleDismissAllPending(
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
 
-  const messages = await getPendingMessages(env);
-  await env.PROFILE_CACHE.put("pending_messages", JSON.stringify([]));
-  return jsonResponse({ ok: true, dismissed: messages.length });
+  const dismissed = await clearPendingMessages(env);
+  return jsonResponse({ ok: true, dismissed });
 }
 
 export async function handleDismissPending(

@@ -1,6 +1,9 @@
-# Instagram Message Hub
+# BootInk Internal Tools
 
-A Cloudflare Worker that receives Instagram DMs via webhook, filters messages based on sender characteristics (verified status, follower count, blocklist), and surfaces qualifying conversations in a built-in dashboard. Agents reply directly from the dashboard — with optional AI-powered auto-replies via Google Gemini.
+A Cloudflare Worker hosting BootInk's internal tools behind a single login. After signing in, a tool picker offers:
+
+- **Instagram DM Manager** (`#/bridge`) — receives Instagram DMs via webhook, filters messages based on sender characteristics (verified status, follower count, blocklist), and surfaces qualifying conversations in a dashboard. Agents reply directly — with optional AI-powered auto-replies via Google Gemini.
+- **Gangsheet Generator** (`#/gangsheet`) — turns Shopify order CSVs into print-ready gangsheet PDF/AI files. Runs the desktop tool's exact Python code in the browser via Pyodide (WebAssembly); no server-side processing. Source of truth is `../BootinkGangsheetGenerator` — `scripts/build-gangsheet-bundle.sh` packages its `app/` code and `assets/` into `dashboard/public/gangsheet/bundle.zip` (run automatically by `npm run deploy`; rerun after changing the generator). The desktop tool's `rsvg-convert` dependency is replaced by canvas rasterization in the browser (see `gangsheet-web/web_runner.py` and `dashboard/src/gangsheet.worker.ts`).
 
 ## How It Works
 

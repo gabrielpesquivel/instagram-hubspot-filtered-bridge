@@ -1,3 +1,8 @@
+NOTE (2026-06-12): HubSpot phased out. The HubSpot endpoints/OAuth listed
+below were never implemented and never will be — DMs are handled by the
+built-in dashboard (pending queue + conversations + Gemini replies).
+Entries below are historical.
+
 INSTAGRAM-HUBSPOT FILTERED BRIDGE - PROGRESS LOG
 ================================================
 

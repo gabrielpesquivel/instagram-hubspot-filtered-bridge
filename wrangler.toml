@@ -2,11 +2,33 @@ name = "instagram-hubspot-bridge"
 main = "src/index.ts"
 compatibility_date = "2025-02-10"
 
+# Custom domain — UNCOMMENT once the bootink.com zone is added to this
+# Cloudflare account (DNS currently at GoDaddy; Workers custom domains
+# require the zone on Cloudflare). Auto-creates DNS record + certificate;
+# workers.dev URL keeps working alongside, so Meta webhook/OAuth unaffected.
+# [[routes]]
+# pattern = "tools.bootink.com"
+# custom_domain = true
+
 [assets]
 directory = "./public"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = true
+
+# Durable Object owning mutable shared state (pending queue, conversations,
+# blocklist, stats, logs, webhook dedup) — serializes writes that raced on KV
+[[durable_objects.bindings]]
+name = "DM_STATE"
+class_name = "DMState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DMState"]
+
+# Daily Meta token refresh check (03:00 UTC)
+[triggers]
+crons = ["0 3 * * *"]
 
 # KV namespace for caching Instagram profiles
 [[kv_namespaces]]

@@ -1,4 +1,7 @@
 import type { Env } from "./types";
+import { DMState, getDMState } from "./dm-state";
+import { isAuthenticated } from "./utils/auth";
+import { refreshMetaTokenIfNeeded } from "./services/facebook-oauth";
 import { handleVerification, handleWebhook } from "./handlers/instagram";
 import {
   handleLogin,
@@ -9,6 +12,7 @@ import {
   handleHealth,
   handleGetPending,
   handleApprovePending,
+  handleApproveAndReply,
   handleApproveAllPending,
   handleRejectPending,
   handleDismissPending,
@@ -22,6 +26,7 @@ import {
   handleGetConversation,
   handleReplyConversation,
   handleGenerateAndSendReply,
+  handleRetryMessage,
   handleArchiveConversation,
   handleSetAutoReply,
   handleDeleteMessage,
@@ -29,6 +34,8 @@ import {
   handleGetAgentSettings,
   handleUpdateAgentSettings,
 } from "./handlers/conversations";
+
+export { DMState };
 import {
   handleFacebookAuthInit,
   handleFacebookCallback,
@@ -75,6 +82,9 @@ export default {
     if (path === "/api/pending/approve" && request.method === "POST") {
       return handleApprovePending(request, env);
     }
+    if (path === "/api/pending/approve-reply" && request.method === "POST") {
+      return handleApproveAndReply(request, env);
+    }
     if (path === "/api/pending/approve-all" && request.method === "POST") {
       return handleApproveAllPending(request, env);
     }
@@ -107,12 +117,17 @@ export default {
       return handleClearAllConversations(request, env);
     }
 
-    // Delete message route: /api/conversations/:senderId/messages/:messageId
-    const msgDeleteMatch = path.match(/^\/api\/conversations\/([^/]+)\/messages\/([^/]+)$/);
-    if (msgDeleteMatch && request.method === "DELETE") {
-      const senderId = decodeURIComponent(msgDeleteMatch[1]);
-      const messageId = decodeURIComponent(msgDeleteMatch[2]);
-      return handleDeleteMessage(request, env, senderId, messageId);
+    // Message routes: /api/conversations/:senderId/messages/:messageId[/retry]
+    const msgMatch = path.match(/^\/api\/conversations\/([^/]+)\/messages\/([^/]+?)(\/retry)?$/);
+    if (msgMatch) {
+      const senderId = decodeURIComponent(msgMatch[1]);
+      const messageId = decodeURIComponent(msgMatch[2]);
+      if (msgMatch[3] && request.method === "POST") {
+        return handleRetryMessage(request, env, senderId, messageId);
+      }
+      if (!msgMatch[3] && request.method === "DELETE") {
+        return handleDeleteMessage(request, env, senderId, messageId);
+      }
     }
 
     // Conversation routes with senderId param
@@ -179,6 +194,14 @@ export default {
       return handleUpdateFilterSettings(request, env);
     }
 
+    // Live updates: WebSocket to the DMState Durable Object
+    if (path === "/api/ws") {
+      if (!(await isAuthenticated(request, env))) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      return getDMState(env).fetch(request);
+    }
+
     // Instagram webhook
     if (path === "/webhook/instagram") {
       if (request.method === "GET") {
@@ -192,5 +215,10 @@ export default {
 
     // Serve static assets / SPA fallback
     return env.ASSETS.fetch(request);
+  },
+
+  // Daily cron: renew the Meta long-lived token before it expires
+  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(refreshMetaTokenIfNeeded(env));
   },
 };

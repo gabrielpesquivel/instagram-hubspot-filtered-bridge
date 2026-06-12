@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MetaConnection } from "./MetaConnection";
 import { FilterSettings } from "./FilterSettings";
 import { WebhookSubscriptions } from "./WebhookSubscriptions";
 import { Conversations } from "./Conversations";
 import { AgentSettings } from "./AgentSettings";
+import { Toaster, toast } from "./toast";
 
 interface Stats {
   pending: { total: number; today: number };
@@ -28,6 +29,7 @@ interface MetaConnectionData {
   instagram_profile_picture_url?: string;
   connected_at?: string;
   user_token_expires_at?: number;
+  auto_refresh_enabled?: boolean;
 }
 
 interface FilterSettingsData {
@@ -74,7 +76,7 @@ interface BlocklistEntry {
 
 type LogTab = "pending" | "skipped" | "conversations";
 
-export function Dashboard({ onLogout }: { onLogout: () => void }) {
+export function Dashboard({ onLogout, onBack }: { onLogout: () => void; onBack?: () => void }) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -91,6 +93,13 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<LogTab>("pending");
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [error, setError] = useState("");
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [replyOpenId, setReplyOpenId] = useState<string | null>(null);
+  const [sendingReplyId, setSendingReplyId] = useState<string | null>(null);
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission>(
+    typeof Notification !== "undefined" ? Notification.permission : "denied"
+  );
+  const prevPendingCount = useRef<number | null>(null);
 
   async function fetchData() {
     try {
@@ -119,13 +128,37 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
       if (connectionRes.ok) setMetaConnection(await connectionRes.json());
       if (filterRes.ok) setFilterSettings(await filterRes.json());
       if (agentRes.ok) setAgentSettings(await agentRes.json());
-      if (pendingRes.ok) setPendingMessages(await pendingRes.json());
+      if (pendingRes.ok) {
+        const pending: PendingMessage[] = await pendingRes.json();
+        // Notify on new pending messages (skip initial load)
+        if (
+          prevPendingCount.current !== null &&
+          pending.length > prevPendingCount.current
+        ) {
+          const newest = pending[pending.length - 1];
+          const text = `New DM from @${newest?.senderUsername ?? "someone"}`;
+          if (
+            typeof Notification !== "undefined" &&
+            Notification.permission === "granted" &&
+            document.hidden
+          ) {
+            new Notification("Instagram DM Manager", { body: text });
+          } else {
+            toast(text, "info");
+          }
+        }
+        prevPendingCount.current = pending.length;
+        setPendingMessages(pending);
+      }
       if (blocklistRes.ok) setBlocklist(await blocklistRes.json());
       setError("");
     } catch {
       setError("Failed to fetch data");
     }
   }
+
+  const fetchDataRef = useRef(fetchData);
+  fetchDataRef.current = fetchData;
 
   async function handleApprove(id: string) {
     const msg = pendingMessages.find((m) => m.id === id);
@@ -137,7 +170,12 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
-    }).then(() => fetchData());
+    })
+      .then((res) => {
+        if (!res.ok) toast("Approve failed — message restored");
+      })
+      .catch(() => toast("Network error — approve failed"))
+      .finally(() => fetchData());
   }
 
   async function handleReject(id: string) {
@@ -150,7 +188,12 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
-    }).then(() => fetchData());
+    })
+      .then((res) => {
+        if (!res.ok) toast("Reject failed — message restored");
+      })
+      .catch(() => toast("Network error — reject failed"))
+      .finally(() => fetchData());
   }
 
   async function handleDismiss(id: string) {
@@ -159,7 +202,12 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
-    }).then(() => fetchData());
+    })
+      .then((res) => {
+        if (!res.ok) toast("Dismiss failed — message restored");
+      })
+      .catch(() => toast("Network error — dismiss failed"))
+      .finally(() => fetchData());
   }
 
   async function handleUnblock(senderId: string) {
@@ -207,9 +255,90 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30_000);
+    // 30s polling stays as fallback; WebSocket below pushes updates instantly
+    const interval = setInterval(() => fetchDataRef.current(), 30_000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Live updates: WebSocket to the worker's Durable Object; reconnects with
+  // backoff, debounces bursts of change events into one refetch.
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let closed = false;
+    let retryMs = 1000;
+    let debounce: number | undefined;
+
+    function connect() {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      try {
+        ws = new WebSocket(`${proto}://${location.host}/api/ws`);
+      } catch {
+        return;
+      }
+      ws.onopen = () => {
+        retryMs = 1000;
+      };
+      ws.onmessage = () => {
+        clearTimeout(debounce);
+        debounce = window.setTimeout(() => fetchDataRef.current(), 300);
+      };
+      ws.onclose = () => {
+        if (!closed) {
+          retryMs = Math.min(retryMs * 2, 30_000);
+          setTimeout(connect, retryMs);
+        }
+      };
+    }
+
+    connect();
+    return () => {
+      closed = true;
+      clearTimeout(debounce);
+      ws?.close();
+    };
+  }, []);
+
+  // Tab title badge with pending count
+  useEffect(() => {
+    document.title =
+      pendingMessages.length > 0
+        ? `(${pendingMessages.length}) DM Manager`
+        : "BootInk Internal Tools";
+    return () => {
+      document.title = "BootInk Internal Tools";
+    };
+  }, [pendingMessages.length]);
+
+  async function handleApproveReply(id: string) {
+    const text = replyDrafts[id]?.trim();
+    if (!text) return;
+    setSendingReplyId(id);
+    try {
+      const res = await fetch("/api/pending/approve-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, text }),
+      });
+      if (res.ok) {
+        toast("Approved & reply sent", "success");
+        const msg = pendingMessages.find((m) => m.id === id);
+        if (msg) {
+          setPendingMessages((prev) => prev.filter((m) => m.senderId !== msg.senderId));
+        }
+        setReplyOpenId(null);
+        setReplyDrafts((prev) => ({ ...prev, [id]: "" }));
+      } else {
+        const body = await res.json().catch(() => ({}));
+        toast(body.error || "Approve & reply failed");
+      }
+    } catch {
+      toast("Network error — approve & reply failed");
+    } finally {
+      setSendingReplyId(null);
+      fetchData();
+    }
+  }
 
   const skippedLogs = logs.filter((l) => l.type === "skipped");
   const totalSkipped = stats
@@ -223,9 +352,28 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     <div style={styles.wrapper}>
       <header style={styles.topBar}>
         <div style={styles.topBarInner}>
+          {onBack && (
+            <button onClick={onBack} style={{ ...styles.logoutBtn, marginLeft: 0, marginRight: "0.75rem" }}>
+              ← Tools
+            </button>
+          )}
           <img src="/logo.png" alt="BootInk" style={styles.topBarLogo} />
           <span style={styles.topBarTitle}>Instagram DM Manager</span>
-          <button onClick={onLogout} style={styles.logoutBtn}>
+          {notifPerm === "default" && (
+            <button
+              onClick={() =>
+                Notification.requestPermission().then((p) => setNotifPerm(p))
+              }
+              style={{ ...styles.logoutBtn, marginLeft: "auto", marginRight: "0.5rem" }}
+              title="Get a desktop notification when a new DM arrives"
+            >
+              🔔 Enable alerts
+            </button>
+          )}
+          <button
+            onClick={onLogout}
+            style={{ ...styles.logoutBtn, ...(notifPerm === "default" ? { marginLeft: 0 } : {}) }}
+          >
             Log out
           </button>
         </div>
@@ -386,6 +534,14 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                           Approve
                         </button>
                         <button
+                          onClick={() =>
+                            setReplyOpenId(replyOpenId === msg.id ? null : msg.id)
+                          }
+                          style={styles.replyToggleBtn}
+                        >
+                          Approve & Reply…
+                        </button>
+                        <button
                           onClick={() => handleReject(msg.id)}
                           style={styles.rejectBtn}
                         >
@@ -398,6 +554,27 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                           Dismiss
                         </button>
                       </div>
+                      {replyOpenId === msg.id && (
+                        <div style={styles.inlineReplyRow}>
+                          <textarea
+                            value={replyDrafts[msg.id] || ""}
+                            onChange={(e) =>
+                              setReplyDrafts((prev) => ({ ...prev, [msg.id]: e.target.value }))
+                            }
+                            placeholder={`Reply to @${msg.senderUsername}…`}
+                            rows={2}
+                            style={styles.inlineReplyInput}
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => handleApproveReply(msg.id)}
+                            disabled={sendingReplyId === msg.id || !replyDrafts[msg.id]?.trim()}
+                            style={styles.inlineReplySend}
+                          >
+                            {sendingReplyId === msg.id ? "Sending…" : "Send"}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                   </>
@@ -470,6 +647,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
       <div style={styles.buildStamp}>
         Last updated {formatBuildTime()}
       </div>
+      <Toaster />
     </div>
   );
 }
@@ -580,10 +758,13 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     gap: "1.5rem",
     alignItems: "flex-start",
+    flexWrap: "wrap" as const,
   },
   leftCol: {
     width: "280px",
     flexShrink: 0,
+    flexGrow: 1,
+    maxWidth: "100%",
   },
   rightCol: {
     flex: 1,
@@ -755,6 +936,41 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "4px",
     cursor: "pointer",
     fontSize: "0.75rem",
+    fontWeight: 600,
+  },
+  replyToggleBtn: {
+    padding: "0.3rem 0.8rem",
+    background: "#2196f3",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "0.75rem",
+    fontWeight: 600,
+  },
+  inlineReplyRow: {
+    display: "flex",
+    gap: "0.5rem",
+    marginTop: "0.5rem",
+    alignItems: "flex-end",
+  },
+  inlineReplyInput: {
+    flex: 1,
+    padding: "0.5rem",
+    border: "1px solid #ccc",
+    borderRadius: "4px",
+    fontSize: "0.85rem",
+    fontFamily: "inherit",
+    resize: "vertical" as const,
+  },
+  inlineReplySend: {
+    padding: "0.45rem 1rem",
+    background: "#4caf50",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "0.8rem",
     fontWeight: 600,
   },
   langBadge: {

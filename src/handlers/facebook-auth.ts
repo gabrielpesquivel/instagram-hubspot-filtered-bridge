@@ -147,8 +147,8 @@ export async function handleFacebookCallback(
     );
   }
 
-  // Store connection
-  await storeConnection(pageWithIG, userTokenExpiresAt, env);
+  // Store connection (incl. user token so the daily cron can auto-refresh it)
+  await storeConnection(pageWithIG, userTokenExpiresAt, env, longTokenResult.access_token);
 
   return htmlResponse(
     "Connected Successfully",
@@ -181,6 +181,7 @@ export async function handleGetConnection(
     instagram_profile_picture_url: connection.instagram_profile_picture_url,
     connected_at: connection.connected_at,
     user_token_expires_at: connection.user_token_expires_at,
+    auto_refresh_enabled: !!connection.user_access_token,
   });
 }
 

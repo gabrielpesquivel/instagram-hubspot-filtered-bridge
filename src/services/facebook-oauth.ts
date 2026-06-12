@@ -25,6 +25,9 @@ export interface MetaConnection {
   instagram_profile_picture_url: string;
   connected_at: string;
   user_token_expires_at: number;
+  /** Long-lived user token kept for automatic renewal (absent on connections
+   *  made before auto-refresh existed — those need one manual reconnect). */
+  user_access_token?: string;
 }
 
 /**
@@ -205,7 +208,8 @@ export async function fetchPagesAndInstagramAccounts(
 export async function storeConnection(
   page: FacebookPage,
   userTokenExpiresAt: number,
-  env: Env
+  env: Env,
+  userAccessToken?: string
 ): Promise<void> {
   const connection: MetaConnection = {
     facebook_page_id: page.id,
@@ -217,6 +221,7 @@ export async function storeConnection(
       page.instagram_business_account!.profile_picture_url || "",
     connected_at: new Date().toISOString(),
     user_token_expires_at: userTokenExpiresAt,
+    ...(userAccessToken ? { user_access_token: userAccessToken } : {}),
   };
 
   await env.PROFILE_CACHE.put(KV_KEY, JSON.stringify(connection));
@@ -242,6 +247,50 @@ export async function getConnection(
 export async function clearConnection(env: Env): Promise<void> {
   await env.PROFILE_CACHE.delete(KV_KEY);
   await clog(env, "Meta connection cleared");
+}
+
+const REFRESH_THRESHOLD_MS = 10 * 24 * 60 * 60 * 1000; // refresh when <10 days left
+
+/**
+ * Daily cron: when the stored long-lived user token is within 10 days of
+ * expiry, exchange it for a fresh 60-day token and re-fetch the page token.
+ * Connections made before auto-refresh existed lack the user token — the
+ * dashboard banner asks for one manual reconnect in that case.
+ */
+export async function refreshMetaTokenIfNeeded(env: Env): Promise<void> {
+  const connection = await getConnection(env);
+  if (!connection) return;
+
+  if (!connection.user_access_token) {
+    await clog(env, "Token refresh skipped: no stored user token (reconnect Facebook once to enable auto-refresh)");
+    return;
+  }
+
+  const msLeft = connection.user_token_expires_at - Date.now();
+  if (msLeft > REFRESH_THRESHOLD_MS) return;
+
+  const refreshed = await exchangeForLongLivedToken(connection.user_access_token, env);
+  if (!refreshed) {
+    await cerr(env, "Token refresh failed — token may already be expired; reconnect Facebook from the dashboard");
+    return;
+  }
+
+  const pages = await fetchPagesAndInstagramAccounts(refreshed.access_token, env);
+  const page =
+    pages.find((p) => p.id === connection.facebook_page_id && p.instagram_business_account) ||
+    pages.find((p) => p.instagram_business_account);
+  if (!page) {
+    await cerr(env, "Token refresh: token renewed but no page with Instagram account found");
+    return;
+  }
+
+  await storeConnection(
+    page,
+    Date.now() + refreshed.expires_in * 1000,
+    env,
+    refreshed.access_token
+  );
+  await clog(env, `Meta token auto-refreshed — next expiry in ${Math.round(refreshed.expires_in / 86400)} days`);
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   setAutoReply,
   deleteMessage,
   clearAllConversations,
+  setMessageStatus,
 } from "../services/conversations";
 import { sendMessage } from "../services/instagram-api";
 import {
@@ -81,19 +82,64 @@ export async function handleReplyConversation(
 
   // Send via Instagram
   const sent = await sendMessage(senderId, text, env, { humanAgent: expired });
-  if (!sent) {
-    return jsonResponse({ error: "Failed to send message via Instagram" }, 500);
-  }
 
-  // Store in conversation
-  const conv = await getConversation(senderId, env);
-  const username = conv?.senderUsername || senderId;
-  await addMessageToConversation(senderId, username, text, "agent", env);
+  // Store either way — failed sends stay visible with a retry button
+  const username = conv0?.senderUsername || senderId;
+  await addMessageToConversation(
+    senderId, username, text, "agent", env, undefined,
+    sent ? "sent" : "failed"
+  );
+
+  if (!sent) {
+    await appendLog({
+      type: "error",
+      message: `Reply to @${username} failed to send — retry available`,
+    }, env);
+    return jsonResponse({ error: "Failed to send via Instagram — saved as failed, use retry", failed: true }, 502);
+  }
 
   await incrementStat("replied", env);
   await appendLog({
     type: "replied",
     message: `Reply to @${username} — "${text.slice(0, 80)}"`,
+  }, env);
+
+  return jsonResponse({ ok: true });
+}
+
+/**
+ * Retry a previously failed outbound message.
+ */
+export async function handleRetryMessage(
+  request: Request,
+  env: Env,
+  senderId: string,
+  messageId: string
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
+  const conv = await getConversation(senderId, env);
+  const msg = conv?.messages.find((m) => m.id === messageId);
+  if (!conv || !msg) {
+    return jsonResponse({ error: "Message not found" }, 404);
+  }
+  if (msg.sender !== "agent" || msg.status !== "failed") {
+    return jsonResponse({ error: "Only failed outbound messages can be retried" }, 400);
+  }
+
+  const expired = isWindowExpired(conv.messages);
+  const sent = await sendMessage(senderId, msg.text, env, { humanAgent: expired });
+  if (!sent) {
+    return jsonResponse({ error: "Send failed again" }, 502);
+  }
+
+  await setMessageStatus(senderId, messageId, "sent", env);
+  await incrementStat("replied", env);
+  await appendLog({
+    type: "replied",
+    message: `Retry to @${conv.senderUsername} succeeded — "${msg.text.slice(0, 80)}"`,
   }, env);
 
   return jsonResponse({ ok: true });
@@ -126,12 +172,20 @@ export async function handleGenerateAndSendReply(
 
     // Send immediately via Instagram
     const sent = await sendMessage(senderId, suggestion, env);
-    if (!sent) {
-      return jsonResponse({ error: "Generated reply but failed to send via Instagram", suggestion }, 500);
-    }
 
-    // Store in conversation
-    await addMessageToConversation(senderId, conv.senderUsername, suggestion, "agent", env);
+    // Store either way — failed sends stay visible with a retry button
+    await addMessageToConversation(
+      senderId, conv.senderUsername, suggestion, "agent", env, undefined,
+      sent ? "sent" : "failed"
+    );
+
+    if (!sent) {
+      await appendLog({
+        type: "error",
+        message: `AI reply to @${conv.senderUsername} failed to send — retry available`,
+      }, env);
+      return jsonResponse({ error: "Generated reply but send failed — saved as failed, use retry", suggestion, failed: true }, 502);
+    }
 
     await incrementStat("replied", env);
     await appendLog({

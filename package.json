@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "build:dashboard": "cd dashboard && npm install && npm run build",
-    "deploy": "npm run build:dashboard && wrangler deploy",
+    "build:gangsheet": "bash scripts/build-gangsheet-bundle.sh",
+    "deploy": "npm run build:gangsheet && npm run build:dashboard && wrangler deploy",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

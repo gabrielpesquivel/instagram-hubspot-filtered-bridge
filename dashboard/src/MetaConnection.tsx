@@ -5,6 +5,7 @@ interface MetaConnectionData {
   instagram_profile_picture_url?: string;
   connected_at?: string;
   user_token_expires_at?: number;
+  auto_refresh_enabled?: boolean;
 }
 
 export function MetaConnection({
@@ -60,13 +61,24 @@ export function MetaConnection({
                     fontWeight: expiringSoon ? 600 : 400,
                   }}
                 >
-                  {expiringSoon
-                    ? `Token expires in ${expiresInDays} day(s) — reconnect soon`
-                    : `Token expires in ${expiresInDays} days`}
+                  {connection!.auto_refresh_enabled
+                    ? `Token expires in ${expiresInDays} days (auto-renews daily)`
+                    : expiringSoon
+                      ? `Token expires in ${expiresInDays} day(s) — reconnect soon`
+                      : `Token expires in ${expiresInDays} days`}
                 </div>
               )}
             </div>
           </div>
+          {!connection!.auto_refresh_enabled && (
+            <div style={styles.refreshWarning}>
+              Auto-renewal is off for this connection.{" "}
+              <a href="/auth/facebook" style={styles.refreshWarningLink}>
+                Reconnect once
+              </a>{" "}
+              to stop the token from expiring every ~60 days.
+            </div>
+          )}
           <button onClick={handleDisconnect} style={styles.disconnectBtn}>
             Disconnect
           </button>
@@ -126,6 +138,19 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "0.8rem",
     color: "#999",
     marginTop: "2px",
+  },
+  refreshWarning: {
+    background: "#fff3e0",
+    border: "1px solid #ffb74d",
+    borderRadius: "4px",
+    padding: "0.5rem 0.75rem",
+    fontSize: "0.78rem",
+    color: "#7a4f01",
+    marginBottom: "0.75rem",
+  },
+  refreshWarningLink: {
+    color: "#1877f2",
+    fontWeight: 600,
   },
   disconnectBtn: {
     padding: "0.4rem 0.8rem",

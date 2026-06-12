@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { toast } from "./toast";
 
 interface ConversationSummary {
   senderId: string;
@@ -16,6 +17,7 @@ interface ConversationMessage {
   sender: "user" | "agent";
   text: string;
   translation?: string;
+  status?: "sent" | "failed";
   timestamp: string;
 }
 
@@ -42,6 +44,8 @@ export function Conversations() {
   const [generateError, setGenerateError] = useState("");
   const [sending, setSending] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   async function fetchConversations() {
@@ -98,16 +102,49 @@ export function Conversations() {
         body: JSON.stringify({ text }),
       });
       if (!res.ok) {
-        setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
-        setReplyText(text);
+        const body = await res.json().catch(() => ({} as { failed?: boolean; error?: string }));
+        if (body.failed) {
+          // Stored server-side as failed — refetch to show the retry button
+          toast("Send failed — saved with a retry button");
+          fetchMessages(selected);
+        } else {
+          setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+          setReplyText(text);
+          toast(body.error || "Send failed");
+        }
       } else {
         fetchConversations();
       }
     } catch {
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
       setReplyText(text);
+      toast("Network error — message not sent");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleRetry(messageId: string) {
+    if (!selected || retryingId) return;
+    setRetryingId(messageId);
+    try {
+      const res = await fetch(
+        `/api/conversations/${encodeURIComponent(selected)}/messages/${encodeURIComponent(messageId)}/retry`,
+        { method: "POST" }
+      );
+      if (res.ok) {
+        toast("Message sent", "success");
+        setMessages((prev) =>
+          prev.map((m) => (m.id === messageId ? { ...m, status: "sent" } : m))
+        );
+      } else {
+        const body = await res.json().catch(() => ({} as { error?: string }));
+        toast(body.error || "Retry failed");
+      }
+    } catch {
+      toast("Network error — retry failed");
+    } finally {
+      setRetryingId(null);
     }
   }
 
@@ -131,10 +168,15 @@ export function Conversations() {
         setMessages((prev) => [...prev, sent]);
         fetchConversations();
       } else {
+        if (data.failed && selected) {
+          toast("AI reply generated but send failed — retry from the thread");
+          fetchMessages(selected);
+        }
         setGenerateError(data.error || "Generation failed");
       }
     } catch {
       setGenerateError("Network error");
+      toast("Network error — AI reply failed");
     } finally {
       setGenerating(false);
     }
@@ -206,6 +248,14 @@ export function Conversations() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const filteredConversations = search.trim()
+    ? conversations.filter(
+        (c) =>
+          c.senderUsername.toLowerCase().includes(search.trim().toLowerCase()) ||
+          c.lastMessageSnippet.toLowerCase().includes(search.trim().toLowerCase())
+      )
+    : conversations;
+
   function formatTime(iso: string): string {
     const d = new Date(iso);
     const now = new Date();
@@ -230,10 +280,21 @@ export function Conversations() {
             </button>
           )}
         </div>
-        {conversations.length === 0 ? (
-          <div style={styles.empty}>No active conversations</div>
+        {conversations.length > 3 && (
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search…"
+            style={styles.searchInput}
+          />
+        )}
+        {filteredConversations.length === 0 ? (
+          <div style={styles.empty}>
+            {conversations.length === 0 ? "No active conversations" : "No matches"}
+          </div>
         ) : (
-          conversations.map((c) => (
+          filteredConversations.map((c) => (
             <div
               key={c.senderId}
               onClick={() => selectConversation(c.senderId)}
@@ -306,6 +367,18 @@ export function Conversations() {
                       <div style={styles.translation}>{m.translation}</div>
                     )}
                     <div style={styles.bubbleTime}>{formatTime(m.timestamp)}</div>
+                    {m.status === "failed" && (
+                      <div style={styles.failedRow}>
+                        <span style={styles.failedBadge}>not sent</span>
+                        <button
+                          onClick={() => handleRetry(m.id)}
+                          disabled={retryingId === m.id}
+                          style={styles.retryBtn}
+                        >
+                          {retryingId === m.id ? "Retrying…" : "Retry"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <button
                     onClick={() => handleDeleteMessage(m.id)}
@@ -399,6 +472,42 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     fontSize: "0.65rem",
     fontWeight: 600,
+  },
+  searchInput: {
+    width: "calc(100% - 1.5rem)",
+    margin: "0.5rem 0.75rem",
+    padding: "0.35rem 0.6rem",
+    border: "1px solid #ddd",
+    borderRadius: "4px",
+    fontSize: "0.8rem",
+    outline: "none",
+    boxSizing: "border-box" as const,
+  },
+  failedRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.4rem",
+    marginTop: "0.35rem",
+  },
+  failedBadge: {
+    fontSize: "0.6rem",
+    fontWeight: 700,
+    background: "#fff",
+    color: "#d32f2f",
+    border: "1px solid #d32f2f",
+    padding: "1px 5px",
+    borderRadius: "3px",
+    textTransform: "uppercase" as const,
+  },
+  retryBtn: {
+    padding: "0.15rem 0.6rem",
+    background: "#d32f2f",
+    color: "#fff",
+    border: "none",
+    borderRadius: "3px",
+    cursor: "pointer",
+    fontSize: "0.65rem",
+    fontWeight: 700,
   },
   empty: {
     padding: "2rem 1rem",

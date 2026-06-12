@@ -1,6 +1,5 @@
 import type { Env } from "../types";
-
-const KV_KEY = "blocklist";
+import { getDMState } from "../dm-state";
 
 export interface BlocklistEntry {
   senderId: string;
@@ -12,24 +11,18 @@ export async function addToBlocklist(
   entry: Omit<BlocklistEntry, "blockedAt">,
   env: Env
 ): Promise<void> {
-  const list = await getBlocklist(env);
-  if (list.some((e) => e.senderId === entry.senderId)) return;
-  list.push({ ...entry, blockedAt: new Date().toISOString() });
-  await env.PROFILE_CACHE.put(KV_KEY, JSON.stringify(list));
+  return getDMState(env).addBlock(entry);
 }
 
 export async function removeFromBlocklist(
   senderId: string,
   env: Env
 ): Promise<void> {
-  const list = await getBlocklist(env);
-  const filtered = list.filter((e) => e.senderId !== senderId);
-  await env.PROFILE_CACHE.put(KV_KEY, JSON.stringify(filtered));
+  return getDMState(env).removeBlock(senderId);
 }
 
 export async function getBlocklist(env: Env): Promise<BlocklistEntry[]> {
-  const raw = await env.PROFILE_CACHE.get(KV_KEY);
-  return raw ? JSON.parse(raw) : [];
+  return getDMState(env).listBlocklist();
 }
 
 export async function isBlocklisted(

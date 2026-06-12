@@ -1,7 +1,13 @@
+import type { DMState } from "./dm-state";
+
 // Environment bindings for Cloudflare Worker
 export interface Env {
   // KV namespace
   PROFILE_CACHE: KVNamespace;
+
+  // Durable Object owning all mutable shared state (pending, conversations,
+  // blocklist, stats, logs, webhook dedup)
+  DM_STATE: DurableObjectNamespace<DMState>;
 
   // Meta/Instagram secrets
   META_APP_ID: string;
@@ -83,6 +89,8 @@ export interface ConversationMessage {
   sender: "user" | "agent";
   text: string;
   translation?: string;
+  /** Outbound delivery status — "failed" means Instagram send failed; retryable */
+  status?: "sent" | "failed";
   timestamp: string;
 }
 

@@ -1,6 +1,5 @@
 import type { Env } from "../types";
-
-const KV_KEY = "pending_messages";
+import { getDMState } from "../dm-state";
 
 export interface PendingMessage {
   id: string;
@@ -14,50 +13,34 @@ export interface PendingMessage {
   language?: string;
 }
 
+// All mutations go through the DMState Durable Object so concurrent webhooks
+// can't clobber each other (the old KV read-modify-write lost messages).
+
 export async function addPendingMessage(
   msg: Omit<PendingMessage, "id" | "timestamp">,
   env: Env
 ): Promise<PendingMessage> {
-  const entry: PendingMessage = {
-    ...msg,
-    id: crypto.randomUUID(),
-    timestamp: new Date().toISOString(),
-  };
-  const raw = await env.PROFILE_CACHE.get(KV_KEY);
-  const messages: PendingMessage[] = raw ? JSON.parse(raw) : [];
-  messages.push(entry);
-  await env.PROFILE_CACHE.put(KV_KEY, JSON.stringify(messages));
-  return entry;
+  return getDMState(env).addPending(msg);
 }
 
 export async function getPendingMessages(env: Env): Promise<PendingMessage[]> {
-  const raw = await env.PROFILE_CACHE.get(KV_KEY);
-  return raw ? JSON.parse(raw) : [];
+  return getDMState(env).listPending();
 }
 
 export async function removePendingMessage(
   id: string,
   env: Env
 ): Promise<PendingMessage | null> {
-  const raw = await env.PROFILE_CACHE.get(KV_KEY);
-  const messages: PendingMessage[] = raw ? JSON.parse(raw) : [];
-  const index = messages.findIndex((m) => m.id === id);
-  if (index === -1) return null;
-  const [removed] = messages.splice(index, 1);
-  await env.PROFILE_CACHE.put(KV_KEY, JSON.stringify(messages));
-  return removed;
+  return getDMState(env).removePending(id);
 }
 
 export async function removePendingBySender(
   senderId: string,
   env: Env
 ): Promise<PendingMessage[]> {
-  const raw = await env.PROFILE_CACHE.get(KV_KEY);
-  const messages: PendingMessage[] = raw ? JSON.parse(raw) : [];
-  const kept = messages.filter((m) => m.senderId !== senderId);
-  const removed = messages.filter((m) => m.senderId === senderId);
-  if (removed.length > 0) {
-    await env.PROFILE_CACHE.put(KV_KEY, JSON.stringify(kept));
-  }
-  return removed;
+  return getDMState(env).removePendingBySender(senderId);
+}
+
+export async function clearPendingMessages(env: Env): Promise<number> {
+  return getDMState(env).clearPending();
 }

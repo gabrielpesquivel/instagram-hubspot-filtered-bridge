@@ -29,3 +29,5 @@ Thumbs.db
 
 # Other
 .claude
+# Gangsheet bundle (built by scripts/build-gangsheet-bundle.sh)
+dashboard/public/gangsheet/

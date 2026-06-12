@@ -1,6 +1,13 @@
-# Instagram-HubSpot Filtered Bridge
+# Instagram DM Manager (formerly Instagram-HubSpot Filtered Bridge)
 
-## Project Specification
+> **HubSpot has been phased out (June 2026).** The product never shipped the
+> HubSpot forwarding leg; instead, qualifying DMs go to a built-in approval
+> queue + conversations dashboard with Gemini AI-assisted replies. Everything
+> below referring to HubSpot endpoints, OAuth, or Custom Channels is historical
+> design context only — none of it exists in the codebase. See README.md for
+> current behavior.
+
+## Project Specification (historical)
 
 ### Overview
 

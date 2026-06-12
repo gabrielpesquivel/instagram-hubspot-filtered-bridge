@@ -30,7 +30,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
         onLogin();
       } else {
         setError("Invalid password");
-        setHint("Best OS + meaning of life");
+        setHint("🐔 + 🍔");
       }
     } catch {
       setError("Connection failed");
@@ -43,7 +43,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
     <div style={styles.container}>
       <form onSubmit={handleSubmit} style={styles.form}>
         <img src="/logo.png" alt="BootInk" style={styles.logo} />
-        <h1 style={styles.title}>Bridge Dashboard</h1>
+        <h1 style={styles.title}>Internal Tools</h1>
         <input
           type="text"
           placeholder="Username"
@@ -92,7 +92,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: "1rem",
   },
   logo: {
-    width: "120px",
+    width: "240px",
     height: "auto",
   },
   title: {

@@ -1,41 +1,14 @@
 import type { Env, Conversation, ConversationMessage, ConversationSummary } from "../types";
+import { getDMState } from "../dm-state";
 
-const INDEX_KEY = "conversations_index";
-
-function convKey(senderId: string): string {
-  return `conv:${senderId}`;
-}
+// All conversation state lives in the DMState Durable Object — mutations are
+// serialized there, so message/index updates can't race.
 
 export async function getConversation(
   senderId: string,
   env: Env
 ): Promise<Conversation | null> {
-  const raw = await env.PROFILE_CACHE.get(convKey(senderId));
-  if (!raw) return null;
-  const conv = JSON.parse(raw) as Conversation;
-  if (conv.autoReply === undefined) conv.autoReply = false;
-  return conv;
-}
-
-export async function getOrCreateConversation(
-  senderId: string,
-  senderUsername: string,
-  env: Env
-): Promise<Conversation> {
-  const existing = await getConversation(senderId, env);
-  if (existing) return existing;
-
-  const now = new Date().toISOString();
-  const conv: Conversation = {
-    senderId,
-    senderUsername,
-    messages: [],
-    autoReply: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await env.PROFILE_CACHE.put(convKey(senderId), JSON.stringify(conv));
-  return conv;
+  return getDMState(env).getConversation(senderId);
 }
 
 export async function deleteMessage(
@@ -43,15 +16,7 @@ export async function deleteMessage(
   messageId: string,
   env: Env
 ): Promise<boolean> {
-  const conv = await getConversation(senderId, env);
-  if (!conv) return false;
-
-  const idx = conv.messages.findIndex((m) => m.id === messageId);
-  if (idx === -1) return false;
-
-  conv.messages.splice(idx, 1);
-  await env.PROFILE_CACHE.put(convKey(senderId), JSON.stringify(conv));
-  return true;
+  return getDMState(env).deleteMessage(senderId, messageId);
 }
 
 export async function addMessageToConversation(
@@ -60,63 +25,39 @@ export async function addMessageToConversation(
   text: string,
   sender: "user" | "agent",
   env: Env,
-  translation?: string
+  translation?: string,
+  status?: "sent" | "failed"
 ): Promise<ConversationMessage> {
-  const conv = await getOrCreateConversation(senderId, senderUsername, env);
+  return getDMState(env).addMessage(senderId, senderUsername, text, sender, translation, status);
+}
 
-  const msg: ConversationMessage = {
-    id: crypto.randomUUID(),
-    sender,
-    text,
-    ...(translation ? { translation } : {}),
-    timestamp: new Date().toISOString(),
-  };
-
-  conv.messages.push(msg);
-  conv.updatedAt = msg.timestamp;
-  await env.PROFILE_CACHE.put(convKey(senderId), JSON.stringify(conv));
-
-  // Update index
-  await updateIndex(senderId, senderUsername, text, sender === "user", env);
-
-  return msg;
+export async function setMessageStatus(
+  senderId: string,
+  messageId: string,
+  status: "sent" | "failed",
+  env: Env
+): Promise<boolean> {
+  return getDMState(env).setMessageStatus(senderId, messageId, status);
 }
 
 export async function getConversationIndex(
   env: Env
 ): Promise<ConversationSummary[]> {
-  const raw = await env.PROFILE_CACHE.get(INDEX_KEY);
-  const index: ConversationSummary[] = raw ? JSON.parse(raw) : [];
-  return index
-    .filter((s) => s.status === "active")
-    .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
+  return getDMState(env).listConversations();
 }
 
 export async function archiveConversation(
   senderId: string,
   env: Env
 ): Promise<boolean> {
-  const raw = await env.PROFILE_CACHE.get(INDEX_KEY);
-  const index: ConversationSummary[] = raw ? JSON.parse(raw) : [];
-  const entry = index.find((s) => s.senderId === senderId);
-  if (!entry) return false;
-
-  entry.status = "archived";
-  await env.PROFILE_CACHE.put(INDEX_KEY, JSON.stringify(index));
-  return true;
+  return getDMState(env).archiveConversation(senderId);
 }
 
 export async function markConversationRead(
   senderId: string,
   env: Env
 ): Promise<void> {
-  const raw = await env.PROFILE_CACHE.get(INDEX_KEY);
-  const index: ConversationSummary[] = raw ? JSON.parse(raw) : [];
-  const entry = index.find((s) => s.senderId === senderId);
-  if (entry) {
-    entry.unread = false;
-    await env.PROFILE_CACHE.put(INDEX_KEY, JSON.stringify(index));
-  }
+  return getDMState(env).markConversationRead(senderId);
 }
 
 export async function setAutoReply(
@@ -124,38 +65,11 @@ export async function setAutoReply(
   enabled: boolean,
   env: Env
 ): Promise<boolean> {
-  // Update conversation object
-  const conv = await getConversation(senderId, env);
-  if (!conv) return false;
-  conv.autoReply = enabled;
-  await env.PROFILE_CACHE.put(convKey(senderId), JSON.stringify(conv));
-
-  // Update index
-  const raw = await env.PROFILE_CACHE.get(INDEX_KEY);
-  const index: ConversationSummary[] = raw ? JSON.parse(raw) : [];
-  const entry = index.find((s) => s.senderId === senderId);
-  if (entry) {
-    entry.autoReply = enabled;
-    await env.PROFILE_CACHE.put(INDEX_KEY, JSON.stringify(index));
-  }
-  return true;
+  return getDMState(env).setAutoReply(senderId, enabled);
 }
 
 export async function clearAllConversations(env: Env): Promise<number> {
-  const raw = await env.PROFILE_CACHE.get(INDEX_KEY);
-  const index: ConversationSummary[] = raw ? JSON.parse(raw) : [];
-  const active = index.filter((s) => s.status === "active");
-
-  // Delete each conversation object
-  for (const entry of active) {
-    await env.PROFILE_CACHE.delete(convKey(entry.senderId));
-  }
-
-  // Remove active entries from index
-  const remaining = index.filter((s) => s.status !== "active");
-  await env.PROFILE_CACHE.put(INDEX_KEY, JSON.stringify(remaining));
-
-  return active.length;
+  return getDMState(env).clearAllConversations();
 }
 
 export async function setConversationLanguage(
@@ -163,51 +77,5 @@ export async function setConversationLanguage(
   language: string,
   env: Env
 ): Promise<void> {
-  const conv = await getConversation(senderId, env);
-  if (!conv) return;
-  conv.language = language;
-  await env.PROFILE_CACHE.put(convKey(senderId), JSON.stringify(conv));
-
-  // Update index
-  const raw = await env.PROFILE_CACHE.get(INDEX_KEY);
-  const index: ConversationSummary[] = raw ? JSON.parse(raw) : [];
-  const entry = index.find((s) => s.senderId === senderId);
-  if (entry) {
-    entry.language = language;
-    await env.PROFILE_CACHE.put(INDEX_KEY, JSON.stringify(index));
-  }
-}
-
-async function updateIndex(
-  senderId: string,
-  senderUsername: string,
-  lastMessage: string,
-  unread: boolean,
-  env: Env
-): Promise<void> {
-  const raw = await env.PROFILE_CACHE.get(INDEX_KEY);
-  const index: ConversationSummary[] = raw ? JSON.parse(raw) : [];
-
-  const existing = index.find((s) => s.senderId === senderId);
-  const now = new Date().toISOString();
-
-  if (existing) {
-    existing.lastMessageSnippet = lastMessage.slice(0, 80);
-    existing.lastMessageAt = now;
-    existing.senderUsername = senderUsername;
-    if (unread) existing.unread = true;
-    if (existing.status === "archived") existing.status = "active";
-  } else {
-    index.push({
-      senderId,
-      senderUsername,
-      lastMessageSnippet: lastMessage.slice(0, 80),
-      lastMessageAt: now,
-      unread,
-      autoReply: false,
-      status: "active",
-    });
-  }
-
-  await env.PROFILE_CACHE.put(INDEX_KEY, JSON.stringify(index));
+  return getDMState(env).setConversationLanguage(senderId, language);
 }

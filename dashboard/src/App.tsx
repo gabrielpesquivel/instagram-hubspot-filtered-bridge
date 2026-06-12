@@ -1,14 +1,32 @@
 import { useEffect, useState } from "react";
 import { Login } from "./Login";
 import { Dashboard } from "./Dashboard";
+import { ToolPicker } from "./ToolPicker";
+import { Gangsheet } from "./Gangsheet";
+
+type Tool = "picker" | "bridge" | "gangsheet";
+
+function toolFromHash(): Tool {
+  const hash = window.location.hash;
+  if (hash.startsWith("#/bridge")) return "bridge";
+  if (hash.startsWith("#/gangsheet")) return "gangsheet";
+  return "picker";
+}
 
 export function App() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
+  const [tool, setTool] = useState<Tool>(toolFromHash);
 
   useEffect(() => {
     fetch("/api/health")
       .then((res) => setLoggedIn(res.ok))
       .catch(() => setLoggedIn(false));
+  }, []);
+
+  useEffect(() => {
+    const onHashChange = () => setTool(toolFromHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
   if (loggedIn === null) return null;
@@ -17,11 +35,22 @@ export function App() {
     return <Login onLogin={() => setLoggedIn(true)} />;
   }
 
+  const logout = () => {
+    fetch("/api/logout", { method: "POST" });
+    window.location.hash = "";
+    setLoggedIn(false);
+  };
+  const goPicker = () => {
+    window.location.hash = "#/";
+  };
+
+  if (tool === "bridge") return <Dashboard onLogout={logout} onBack={goPicker} />;
+  if (tool === "gangsheet") return <Gangsheet onLogout={logout} onBack={goPicker} />;
   return (
-    <Dashboard
-      onLogout={() => {
-        fetch("/api/logout", { method: "POST" });
-        setLoggedIn(false);
+    <ToolPicker
+      onLogout={logout}
+      onSelect={(t) => {
+        window.location.hash = `#/${t}`;
       }}
     />
   );

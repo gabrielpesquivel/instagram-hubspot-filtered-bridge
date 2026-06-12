@@ -9,6 +9,7 @@ import { clog, cerr } from "../services/logger";
 import { addMessageToConversation, getConversation, markConversationRead, setConversationLanguage } from "../services/conversations";
 import { generateReply, translateMessage, detectLanguage } from "../services/gemini-api";
 import { sendMessage } from "../services/instagram-api";
+import { getDMState } from "../dm-state";
 
 /**
  * Handle Instagram webhook verification (GET request)
@@ -100,16 +101,15 @@ async function processMessage(
 
   const senderId = sender.id;
 
-  // Deduplicate by Instagram message ID to prevent webhook retry duplicates
+  // Deduplicate by Instagram message ID to prevent webhook retry duplicates.
+  // Atomic check-and-mark in the Durable Object, 24h window (Meta can retry
+  // for much longer than the old 1h KV TTL covered).
   if (message.mid) {
-    const dedupKey = `msg_seen:${message.mid}`;
-    const alreadySeen = await env.PROFILE_CACHE.get(dedupKey);
+    const alreadySeen = await getDMState(env).checkAndMarkSeen(message.mid);
     if (alreadySeen) {
       await clog(env, `Duplicate message ${message.mid} — skipping`);
       return;
     }
-    // Mark as seen with 1-hour TTL (webhook retries happen within minutes)
-    await env.PROFILE_CACHE.put(dedupKey, "1", { expirationTtl: 3600 });
   }
 
   // Detect echo messages (sent BY the business account)
@@ -238,13 +238,23 @@ async function processMessage(
           const messagesForReply = [...existingConv.messages, newMsg];
           const reply = await generateReply(messagesForReply, env);
           const sent = await sendMessage(senderId, reply, env);
+          // Store the reply either way — failed sends show in the dashboard
+          // with a retry button instead of disappearing silently
+          await addMessageToConversation(
+            senderId, senderUsername, reply, "agent", env, undefined,
+            sent ? "sent" : "failed"
+          );
           if (sent) {
-            await addMessageToConversation(senderId, senderUsername, reply, "agent", env);
             await markConversationRead(senderId, env);
             await incrementStat("replied", env);
             await appendLog({
               type: "replied",
               message: `AI auto-reply to ${senderLabel} — "${reply.slice(0, 80)}"`,
+            }, env);
+          } else {
+            await appendLog({
+              type: "error",
+              message: `AI auto-reply to ${senderLabel} failed to send — retry from conversation`,
             }, env);
           }
         } catch (error) {
