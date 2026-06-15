@@ -49,6 +49,12 @@ import {
   handleGetFilterSettings,
   handleUpdateFilterSettings,
 } from "./handlers/meta-api";
+import {
+  handleListFiles,
+  handleUploadFile,
+  handleGetFile,
+  handleDeleteFile,
+} from "./handlers/files";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -192,6 +198,20 @@ export default {
     }
     if (path === "/api/settings/filter" && request.method === "POST") {
       return handleUpdateFilterSettings(request, env);
+    }
+
+    // Daily gangsheet file uploads (R2)
+    if (path === "/api/files/get" && request.method === "GET") {
+      return handleGetFile(request, env);
+    }
+    if (path === "/api/files" && request.method === "GET") {
+      return handleListFiles(request, env);
+    }
+    if (path === "/api/files" && request.method === "PUT") {
+      return handleUploadFile(request, env);
+    }
+    if (path === "/api/files" && request.method === "DELETE") {
+      return handleDeleteFile(request, env);
     }
 
     // Live updates: WebSocket to the DMState Durable Object

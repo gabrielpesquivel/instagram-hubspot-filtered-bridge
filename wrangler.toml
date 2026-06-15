@@ -35,6 +35,11 @@ crons = ["0 3 * * *"]
 binding = "PROFILE_CACHE"
 id = "db904047158e47118ea28704c475a41b"
 
+# R2 bucket storing daily gangsheet uploads (keyed gangsheets/<YYYY-MM-DD>/<name>)
+[[r2_buckets]]
+binding = "GANGSHEET_FILES"
+bucket_name = "bootink-gangsheets"
+
 # Environment variables (non-secret)
 [vars]
 FILTER_MIN_FOLLOWERS = "5000"

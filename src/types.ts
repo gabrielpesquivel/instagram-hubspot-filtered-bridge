@@ -5,6 +5,9 @@ export interface Env {
   // KV namespace
   PROFILE_CACHE: KVNamespace;
 
+  // R2 bucket for daily gangsheet file uploads (keyed gangsheets/<YYYY-MM-DD>/<name>)
+  GANGSHEET_FILES: R2Bucket;
+
   // Durable Object owning all mutable shared state (pending, conversations,
   // blocklist, stats, logs, webhook dedup)
   DM_STATE: DurableObjectNamespace<DMState>;
