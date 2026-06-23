@@ -20,6 +20,10 @@ from PIL import Image
 from src import config, layout, pdf_utils
 import main as gangsheet_main
 
+from pdfrw import PdfReader
+from pdfrw.buildxobj import pagexobj
+from pdfrw.toreportlab import makerl
+
 _orig_rasterize_svg = pdf_utils._rasterize_svg
 
 
@@ -31,6 +35,36 @@ def _rasterize_svg(svg_path):
 
 
 pdf_utils._rasterize_svg = _rasterize_svg
+
+
+def _draw_svg_via_pdf(c, svg_path, x, y, target_width, target_height):
+    """Embed the build-time rsvg-convert PDF sidecar exactly as the desktop tool
+    does (same rsvg bytes, same pdfrw form XObject), so the browser output is
+    byte-identical to the exe for gradient/clipPath SVGs. No rsvg-convert binary
+    is needed at runtime — the conversion happened in build-gangsheet-bundle.sh."""
+    sidecar = svg_path + '.pdf'
+    if not os.path.exists(sidecar):
+        return False
+    with open(sidecar, 'rb') as f:
+        reader = PdfReader(fdata=f.read())
+    page = reader.pages[0]
+    xobj = pagexobj(page)
+    rl_obj = makerl(c, xobj)
+
+    orig_w = float(xobj.BBox[2]) - float(xobj.BBox[0])
+    orig_h = float(xobj.BBox[3]) - float(xobj.BBox[1])
+    if orig_w == 0 or orig_h == 0:
+        return False
+
+    c.saveState()
+    c.translate(x, y)
+    c.scale(target_width / orig_w, target_height / orig_h)
+    c.doForm(rl_obj)
+    c.restoreState()
+    return True
+
+
+pdf_utils._draw_svg_via_pdf = _draw_svg_via_pdf
 
 # Pyodide ships an older GEOS that can hit "TopologyException: found non-noded
 # intersection" during unary_union on glyph outlines — and in WASM that aborts
@@ -64,10 +98,15 @@ def collect(csv_path, name):
     items = gangsheet_main.collect_items_from_csv(df)
     _pending[name] = items
 
+    # Gradient/clipPath SVGs are now embedded from build-time rsvg PDF sidecars
+    # (see _draw_svg_via_pdf above), matching the desktop exe exactly. Only fall
+    # back to browser-canvas rasterization if a sidecar is somehow missing.
     raster = set()
     for item in items:
         path = item.get('flag_path') or item.get('symbol_path')
-        if path and not os.path.exists(path + '.png') and pdf_utils._is_raster_svg(path):
+        if (path and not os.path.exists(path + '.pdf')
+                and not os.path.exists(path + '.png')
+                and pdf_utils._is_raster_svg(path)):
             raster.add(path)
 
     return json.dumps({
