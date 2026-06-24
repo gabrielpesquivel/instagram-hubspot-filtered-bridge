@@ -81,7 +81,8 @@ export async function saveGeminiSettings(
 
 export async function generateReply(
   messages: ConversationMessage[],
-  env: Env
+  env: Env,
+  extraInstruction?: string
 ): Promise<string> {
   const settings = await getGeminiSettings(env);
 
@@ -128,7 +129,9 @@ export async function generateReply(
       "x-goog-api-key": env.GEMINI_API_KEY,
     },
     body: JSON.stringify({
-      system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      system_instruction: {
+        parts: [{ text: extraInstruction ? `${SYSTEM_PROMPT}\n\n${extraInstruction}` : SYSTEM_PROMPT }],
+      },
       contents,
       generationConfig: {
         maxOutputTokens: 2048,

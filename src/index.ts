@@ -55,6 +55,14 @@ import {
   handleGetFile,
   handleDeleteFile,
 } from "./handlers/files";
+import {
+  handleGoogleAuthInit,
+  handleGoogleCallback,
+  handleGetEmailConnection,
+  handleDisconnectEmail,
+  handleGetEmailThreads,
+  handleSuggestEmailReply,
+} from "./handlers/email";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -190,6 +198,27 @@ export default {
     }
     if (path === "/api/meta/webhooks" && request.method === "POST") {
       return handleSubscribeWebhooks(request, env);
+    }
+
+    // Email Manager (Gmail) — Google OAuth
+    if (path === "/auth/google" && request.method === "GET") {
+      return handleGoogleAuthInit(request, env);
+    }
+    if (path === "/auth/google/callback" && request.method === "GET") {
+      return handleGoogleCallback(request, env);
+    }
+    if (path === "/api/email/connection" && request.method === "GET") {
+      return handleGetEmailConnection(request, env);
+    }
+    if (path === "/api/email/disconnect" && request.method === "POST") {
+      return handleDisconnectEmail(request, env);
+    }
+    if (path === "/api/email/threads" && request.method === "GET") {
+      return handleGetEmailThreads(request, env);
+    }
+    const emailSuggestMatch = path.match(/^\/api\/email\/threads\/([^/]+)\/suggest$/);
+    if (emailSuggestMatch && request.method === "POST") {
+      return handleSuggestEmailReply(request, env, decodeURIComponent(emailSuggestMatch[1]));
     }
 
     // Filter settings

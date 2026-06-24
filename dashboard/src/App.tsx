@@ -2,16 +2,20 @@ import { useEffect, useState } from "react";
 import { Login } from "./Login";
 import { Dashboard } from "./Dashboard";
 import { ToolPicker } from "./ToolPicker";
+import { CustomerSupport } from "./CustomerSupport";
+import { EmailManager } from "./EmailManager";
 import { Gangsheet } from "./Gangsheet";
 import { DmManager } from "./DmManager";
 
-type Tool = "picker" | "bridge" | "gangsheet" | "dms";
+type Tool = "picker" | "support" | "email" | "bridge" | "gangsheet" | "dms";
 
 function toolFromHash(): Tool {
   const hash = window.location.hash;
   if (hash.startsWith("#/dms")) return "dms";
   if (hash.startsWith("#/bridge")) return "bridge";
   if (hash.startsWith("#/gangsheet")) return "gangsheet";
+  if (hash.startsWith("#/email")) return "email";
+  if (hash.startsWith("#/support")) return "support";
   return "picker";
 }
 
@@ -45,8 +49,22 @@ export function App() {
   const goPicker = () => {
     window.location.hash = "#/";
   };
+  const goSupport = () => {
+    window.location.hash = "#/support";
+  };
 
-  if (tool === "bridge") return <Dashboard onLogout={logout} onBack={goPicker} />;
+  if (tool === "support")
+    return (
+      <CustomerSupport
+        onLogout={logout}
+        onBack={goPicker}
+        onSelect={(t) => {
+          window.location.hash = `#/${t}`;
+        }}
+      />
+    );
+  if (tool === "email") return <EmailManager onLogout={logout} onBack={goSupport} />;
+  if (tool === "bridge") return <Dashboard onLogout={logout} onBack={goSupport} />;
   if (tool === "dms")
     return (
       <DmManager

@@ -107,6 +107,8 @@ Set via `wrangler secret put` for secrets, or in `wrangler.toml` for config:
 | `GEMINI_API_KEY` | Secret | Google Gemini API key for AI replies and translation |
 | `DASHBOARD_PASSWORD` | Secret | Password for dashboard login (user: `admin`) |
 | `META_ADMIN_PASSWORD` | Secret | Alternative admin password (user: `metaadmin`) |
+| `GOOGLE_CLIENT_ID` | Secret | Google OAuth client ID for the Email Manager (Gmail read-only) |
+| `GOOGLE_CLIENT_SECRET` | Secret | Google OAuth client secret for the Email Manager |
 | `FILTER_MIN_FOLLOWERS` | Config | Follower threshold default (default: `5000`) |
 | `CACHE_TTL_SECONDS` | Config | Profile cache duration in seconds (default: `86400`) |
 

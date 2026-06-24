@@ -23,6 +23,10 @@ export interface Env {
   // Gemini AI
   GEMINI_API_KEY: string;
 
+  // Google OAuth (Gmail read-only, for the Email Manager)
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
+
   // Configuration
   FILTER_MIN_FOLLOWERS: string;
   CACHE_TTL_SECONDS: string;
