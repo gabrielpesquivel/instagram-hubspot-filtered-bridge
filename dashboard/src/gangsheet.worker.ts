@@ -4,12 +4,14 @@
 //   { type: "init" }
 //   { type: "generate", name: string, csv: ArrayBuffer }
 //   { type: "raster-done", pngs: { path: string; png: ArrayBuffer }[] }
+//   { type: "images-done", images: { path: string; png: ArrayBuffer }[] }
 //
 // Protocol (worker -> main):
 //   { type: "status", text }            // runtime loading progress
 //   { type: "ready" }
 //   { type: "log", text }               // python stdout/stderr
 //   { type: "need-raster", svgs: { path, svgText }[] }  // canvas rasterization request
+//   { type: "need-images", images: { path, url, remove_bg }[] }  // download custom artwork
 //   { type: "done", name, pdf, count, errors, widthMm, heightMm }
 //   { type: "error", name?, text }
 
@@ -19,6 +21,7 @@ const PYODIDE_BASE = "https://cdn.jsdelivr.net/pyodide/v0.28.3/full/";
 let pyodide: any = null;
 let initPromise: Promise<void> | null = null;
 let rasterResolve: ((pngs: { path: string; png: ArrayBuffer }[]) => void) | null = null;
+let imagesResolve: ((images: { path: string; png: ArrayBuffer }[]) => void) | null = null;
 
 function post(msg: unknown, transfer: Transferable[] = []) {
   (self as any).postMessage(msg, transfer);
@@ -89,6 +92,20 @@ async function generate(name: string, csv: ArrayBuffer) {
     }
   }
 
+  if (collect.images && collect.images.length > 0) {
+    // Customer-uploaded artwork. The main thread downloads each URL (CORS-open
+    // CDNs) and, when remove_bg is set, strips the background, then hands back
+    // PNG bytes. A failed download yields an empty buffer -> the Python side
+    // falls back to the yellow order-number tag for that item.
+    const images = await new Promise<{ path: string; png: ArrayBuffer }[]>((resolve) => {
+      imagesResolve = resolve;
+      post({ type: "need-images", images: collect.images });
+    });
+    for (const { path, png } of images) {
+      if (png.byteLength > 0) pyodide.FS.writeFile(path, new Uint8Array(png));
+    }
+  }
+
   const render = JSON.parse(pyodide.runPython(`web_runner.render(${JSON.stringify(name)})`));
   const pdf: Uint8Array = pyodide.FS.readFile(render.pdf_path);
   pyodide.FS.unlink(render.pdf_path);
@@ -118,6 +135,9 @@ self.onmessage = async (e: MessageEvent) => {
     } else if (msg.type === "raster-done") {
       rasterResolve?.(msg.pngs);
       rasterResolve = null;
+    } else if (msg.type === "images-done") {
+      imagesResolve?.(msg.images);
+      imagesResolve = null;
     }
   } catch (err: any) {
     post({ type: "error", name: msg?.name, text: err?.message || String(err) });

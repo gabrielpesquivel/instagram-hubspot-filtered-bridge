@@ -65,6 +65,35 @@ async function rasterizeSvg(svgText: string): Promise<ArrayBuffer> {
   }
 }
 
+// Fetch a customer-uploaded image and return PNG bytes for Pyodide/Pillow.
+// When removeBg is set, strip the background in-browser via @imgly (downloads a
+// WASM model on first use, then cached). Otherwise re-encode through a canvas so
+// webp/jpg/jpeg all reach Pillow as PNG. Any failure returns an empty buffer,
+// and the Python side falls back to the yellow order-number tag.
+async function fetchImageAsPng(url: string, removeBg: boolean): Promise<ArrayBuffer> {
+  try {
+    if (removeBg) {
+      const { removeBackground } = await import("@imgly/background-removal");
+      const blob = await removeBackground(url);
+      return await blob.arrayBuffer();
+    }
+    const resp = await fetch(url);
+    if (!resp.ok) return new ArrayBuffer(0);
+    const bmp = await createImageBitmap(await resp.blob());
+    const canvas = document.createElement("canvas");
+    canvas.width = bmp.width;
+    canvas.height = bmp.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return new ArrayBuffer(0);
+    ctx.drawImage(bmp, 0, 0);
+    bmp.close();
+    const png: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    return png ? await png.arrayBuffer() : new ArrayBuffer(0);
+  } catch {
+    return new ArrayBuffer(0);
+  }
+}
+
 function triggerDownload(url: string, filename: string) {
   const a = document.createElement("a");
   a.href = url;
@@ -138,6 +167,17 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
           worker.postMessage(
             { type: "raster-done", pngs },
             pngs.map((p) => p.png)
+          );
+          break;
+        }
+        case "need-images": {
+          const images = [];
+          for (const { path, url, remove_bg } of msg.images) {
+            images.push({ path, png: await fetchImageAsPng(url, remove_bg) });
+          }
+          worker.postMessage(
+            { type: "images-done", images },
+            images.map((i) => i.png)
           );
           break;
         }

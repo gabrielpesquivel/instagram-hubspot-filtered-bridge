@@ -87,13 +87,18 @@ def _safe_unary_union(geoms):
 geometry.unary_union = _safe_unary_union
 gangsheet_main.unary_union = _safe_unary_union
 
+# Border around each custom image, per side (mm), baked into its cut cell so the
+# images sit as far apart as the regular grid decals. Bump to spread them more.
+CUSTOM_IMAGE_PAD_MM = 7.5
+
 # Items collected per sheet name, waiting for render()
 _pending = {}
 
 
 def collect(csv_path, name):
-    """Parse a CSV and collect items. Returns JSON with stats and the list of
-    SVGs that need rasterizing in the browser before render() is called."""
+    """Parse a CSV and collect items. Returns JSON with stats, the list of SVGs
+    that need rasterizing, and the list of customer-uploaded images that need
+    downloading in the browser before render() is called."""
     df = pd.read_csv(csv_path, encoding='utf-8-sig')
     items = gangsheet_main.collect_items_from_csv(df)
     _pending[name] = items
@@ -109,16 +114,83 @@ def collect(csv_path, name):
                 and pdf_utils._is_raster_svg(path)):
             raster.add(path)
 
+    # Customer-uploaded "Custom Image" artwork: hand the URLs (and remove-bg flag)
+    # to the main thread, which fetches + optionally background-removes them and
+    # writes a PNG to each item's image_path before render(). Browser-only, no
+    # Shopify API: the URL is already in the order's line-item properties.
+    images = []
+    for idx, item in enumerate(items):
+        if item.get('type') == 'image' and item.get('image_url'):
+            path = f'/tmp/custom_{name}_{idx}.png'
+            item['image_path'] = path
+            images.append({
+                'path': path,
+                'url': item['image_url'],
+                'remove_bg': bool(item.get('image_remove_bg')),
+            })
+
     return json.dumps({
         'count': len(items),
         'errors': sum(1 for i in items if i.get('is_error')),
         'raster_svgs': sorted(raster),
+        'images': images,
     })
+
+
+def _measure_image_items(items):
+    """Size downloaded image items from their real aspect ratio, scaling height
+    down if an image would exceed the usable sheet width. Items whose download
+    failed keep their fallback (yellow order-number) size."""
+    usable = config.PAGE_WIDTH - 2 * config.MARGIN
+    # Border baked into each image's cut cell, per side. Matches the breathing
+    # room the grid decals have (a 10mm symbol in a 25mm cell = 7.5mm/side), so
+    # adjacent custom images get the same ~15mm gap and are easy to weed/cut.
+    pad = CUSTOM_IMAGE_PAD_MM * config.MM_TO_PTS
+    for item in items:
+        if item.get('type') != 'image':
+            continue
+        path = item.get('image_path')
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            with Image.open(path) as im:
+                pw, ph = im.size
+        except Exception:
+            continue
+        if not ph:
+            continue
+        target_h = item['image_height_pts']
+        img_w = target_h * (pw / ph)
+        max_w = usable - 2 * pad
+        if img_w > max_w:
+            target_h *= max_w / img_w
+            img_w = max_w
+            item['image_height_pts'] = target_h
+        item['width'] = img_w + 2 * pad
+        item['height'] = target_h + 2 * pad
 
 
 def render(name):
     """Lay out and render the previously collected items to a PDF."""
     items = _pending.pop(name)
+
+    # Custom-image artwork has now been downloaded to /tmp by the browser; size
+    # each item from the real image before layout (downloads that failed keep
+    # their yellow fallback size).
+    _measure_image_items(items)
+
+    # Custom images are much larger than stickers, so group them all at the end
+    # (tallest first) — they pack into their own rows instead of disrupting the
+    # dense sticker grid. Only successfully-downloaded images are moved; a failed
+    # one stays a grid-sized yellow tag in place.
+    def _is_image(it):
+        return (it.get('type') == 'image' and it.get('image_path')
+                and os.path.exists(it['image_path']))
+
+    rest = [it for it in items if not _is_image(it)]
+    imgs = sorted((it for it in items if _is_image(it)),
+                  key=lambda it: it.get('height', 0), reverse=True)
+    items = rest + imgs
 
     layout_mgr = layout.OptimizedLayoutManager()
     placed_items = layout_mgr.place_items(items)
