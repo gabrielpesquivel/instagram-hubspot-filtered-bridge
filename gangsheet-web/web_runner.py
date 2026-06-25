@@ -87,9 +87,15 @@ def _safe_unary_union(geoms):
 geometry.unary_union = _safe_unary_union
 gangsheet_main.unary_union = _safe_unary_union
 
-# Border around each custom image, per side (mm), baked into its cut cell so the
-# images sit as far apart as the regular grid decals. Bump to spread them more.
-CUSTOM_IMAGE_PAD_MM = 7.5
+# Fixed square cut-box tiers for custom images, chosen by the customer's
+# requested print height (mm):
+#   <=20mm -> 25x25  (inline with the regular sticker grid)
+#   <=40mm -> 50x50  (grouped at the end of the sheet)
+#   >40mm  -> 55x55  (grouped at the end; >50mm scaled to fit)
+# The image is centered and scaled to fit inside its box leaving this margin per
+# side, so it never touches the magenta cut border. 2.5mm makes each tier's max
+# height land exactly on the box interior (25-5=20, 55-5=50).
+CUSTOM_IMAGE_BOX_MARGIN_MM = 2.5
 
 # Items collected per sheet name, waiting for render()
 _pending = {}
@@ -138,14 +144,12 @@ def collect(csv_path, name):
 
 
 def _measure_image_items(items):
-    """Size downloaded image items from their real aspect ratio, scaling height
-    down if an image would exceed the usable sheet width. Items whose download
-    failed keep their fallback (yellow order-number) size."""
-    usable = config.PAGE_WIDTH - 2 * config.MARGIN
-    # Border baked into each image's cut cell, per side. Matches the breathing
-    # room the grid decals have (a 10mm symbol in a 25mm cell = 7.5mm/side), so
-    # adjacent custom images get the same ~15mm gap and are easy to weed/cut.
-    pad = CUSTOM_IMAGE_PAD_MM * config.MM_TO_PTS
+    """Fit each downloaded custom image into a fixed square cut-box chosen by its
+    requested print height, centered and scaled to fit with a margin. Tags each
+    with image_tier ('small' = inline 25x25, 'large' = 50/55 grouped at end).
+    Items whose download failed keep their fallback (yellow order-number) size
+    and get no tier, so they stay a grid-sized tag in place."""
+    margin = CUSTOM_IMAGE_BOX_MARGIN_MM * config.MM_TO_PTS
     for item in items:
         if item.get('type') != 'image':
             continue
@@ -159,15 +163,31 @@ def _measure_image_items(items):
             continue
         if not ph:
             continue
+
+        # Pick the box tier from the requested print height (mm).
+        height_mm = item['image_height_pts'] / config.MM_TO_PTS
+        if height_mm <= 20:
+            box_mm, tier = 25, 'small'
+        elif height_mm <= 40:
+            box_mm, tier = 50, 'large'
+        else:
+            box_mm, tier = 55, 'large'   # 41-50mm, and anything over 50mm
+        box = box_mm * config.MM_TO_PTS
+        inner = box - 2 * margin
+
+        # Center the image at its requested height, scaling down (aspect
+        # preserved) only if it would exceed the box interior either way.
         target_h = item['image_height_pts']
         img_w = target_h * (pw / ph)
-        max_w = usable - 2 * pad
-        if img_w > max_w:
-            target_h *= max_w / img_w
-            img_w = max_w
-            item['image_height_pts'] = target_h
-        item['width'] = img_w + 2 * pad
-        item['height'] = target_h + 2 * pad
+        scale = min(
+            1.0,
+            inner / target_h if target_h > inner else 1.0,
+            inner / img_w if img_w > inner else 1.0,
+        )
+        item['image_height_pts'] = target_h * scale
+        item['width'] = box
+        item['height'] = box
+        item['image_tier'] = tier
 
 
 def render(name):
@@ -179,18 +199,21 @@ def render(name):
     # their yellow fallback size).
     _measure_image_items(items)
 
-    # Custom images are much larger than stickers, so group them all at the end
-    # (tallest first) — they pack into their own rows instead of disrupting the
-    # dense sticker grid. Only successfully-downloaded images are moved; a failed
-    # one stays a grid-sized yellow tag in place.
-    def _is_image(it):
-        return (it.get('type') == 'image' and it.get('image_path')
-                and os.path.exists(it['image_path']))
+    # Small custom images (<=20mm -> 25x25) stay inline in the regular grid, in
+    # their original order. Larger ones (50x50 / 55x55) are grouped at the end,
+    # tallest first, so they pack into their own rows instead of disrupting the
+    # dense sticker grid. The first large image starts a new row, so the switch
+    # from the 25x25 grid into the bigger boxes never disturbs the layout above.
+    def _is_large_image(it):
+        return (it.get('type') == 'image' and it.get('image_tier') == 'large'
+                and it.get('image_path') and os.path.exists(it['image_path']))
 
-    rest = [it for it in items if not _is_image(it)]
-    imgs = sorted((it for it in items if _is_image(it)),
-                  key=lambda it: it.get('height', 0), reverse=True)
-    items = rest + imgs
+    rest = [it for it in items if not _is_large_image(it)]
+    large = sorted((it for it in items if _is_large_image(it)),
+                   key=lambda it: it.get('height', 0), reverse=True)
+    if large:
+        large[0]['new_row'] = True
+    items = rest + large
 
     layout_mgr = layout.OptimizedLayoutManager()
     placed_items = layout_mgr.place_items(items)
