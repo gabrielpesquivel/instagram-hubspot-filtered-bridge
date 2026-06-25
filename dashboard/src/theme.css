@@ -46,3 +46,13 @@ textarea,
 button {
   color-scheme: inherit;
 }
+
+/* contentEditable reply box (Inbox composer) — show a placeholder when empty. */
+.ce-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.ce-editor:focus {
+  outline: none;
+}

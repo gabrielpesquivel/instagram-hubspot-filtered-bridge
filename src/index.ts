@@ -62,6 +62,7 @@ import {
   handleMarkInstagramDone,
 } from "./handlers/instagram-inbox";
 import { handleGetCorrections, handleCorrectionAction } from "./handlers/ai";
+import { handleShopifyOrderLookup, handleShopifyOrdersByEmail } from "./handlers/shopify";
 import {
   handleGoogleAuthInit,
   handleGoogleCallback,
@@ -247,6 +248,14 @@ export default {
     const emailThreadMatch = path.match(/^\/api\/email\/threads\/([^/]+)$/);
     if (emailThreadMatch && request.method === "GET") {
       return handleGetEmailThread(request, env, decodeURIComponent(emailThreadMatch[1]));
+    }
+
+    // Shopify order/tracking lookup (read-only)
+    if (path === "/api/shopify/order" && request.method === "GET") {
+      return handleShopifyOrderLookup(request, env);
+    }
+    if (path === "/api/shopify/orders" && request.method === "GET") {
+      return handleShopifyOrdersByEmail(request, env);
     }
 
     // AI learned-corrections review

@@ -27,6 +27,14 @@ export interface Env {
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
 
+  // Shopify Admin API (read-only order/tracking lookup, dedicated Dev Dashboard
+  // app). New Shopify apps issue a Client ID/Secret, exchanged at runtime for a
+  // 24h access token via the client credentials grant (see shopify-api.ts).
+  SHOPIFY_CLIENT_ID: string;
+  SHOPIFY_CLIENT_SECRET: string;
+  SHOPIFY_STORE_DOMAIN: string;
+  SHOPIFY_API_VERSION: string;
+
   // Configuration
   FILTER_MIN_FOLLOWERS: string;
   CACHE_TTL_SECONDS: string;

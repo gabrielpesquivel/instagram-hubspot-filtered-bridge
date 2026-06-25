@@ -1,4 +1,5 @@
 import type { Env, ConversationMessage } from "../types";
+import { findOrderByName, findOrdersByEmail, shopifyConfigured } from "./shopify-api";
 
 const GEMINI_SETTINGS_KEY = "gemini_settings";
 const DEFAULT_MODEL = "gemini-2.5-flash";
@@ -175,13 +176,85 @@ export async function saveGeminiSettings(
   await env.PROFILE_CACHE.put(GEMINI_SETTINGS_KEY, JSON.stringify(settings));
 }
 
+// Gemini function-calling tools for live Shopify order lookups (Feature 3).
+const SHOPIFY_TOOLS = [
+  {
+    functionDeclarations: [
+      {
+        name: "lookup_order_by_number",
+        description:
+          "Look up a single Shopify order by its order number (e.g. '17725' or '#17725'). Returns financial + fulfillment status, line items, and tracking.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            order_number: { type: "STRING", description: "Order number, with or without the leading '#'." },
+          },
+          required: ["order_number"],
+        },
+      },
+      {
+        name: "lookup_orders_by_email",
+        description:
+          "Look up a customer's recent Shopify orders by email address. Returns up to 5 orders, newest first.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            email: { type: "STRING", description: "The customer's email address." },
+          },
+          required: ["email"],
+        },
+      },
+    ],
+  },
+];
+
+// Execute a tool call and return a plain object for the functionResponse.
+async function runShopifyTool(
+  env: Env,
+  name: string,
+  args: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  if (name === "lookup_order_by_number") {
+    const order = await findOrderByName(env, String(args.order_number ?? ""));
+    return { found: !!order, order: order ?? null };
+  }
+  if (name === "lookup_orders_by_email") {
+    const orders = await findOrdersByEmail(env, String(args.email ?? ""));
+    return { count: orders.length, orders };
+  }
+  return { error: `unknown function: ${name}` };
+}
+
+function shopifyInstruction(customerEmail?: string): string {
+  const emailLine = customerEmail
+    ? `The customer's email is ${customerEmail} — use lookup_orders_by_email with it unless they give a specific order number.`
+    : `Ask for or infer the order number or email from the conversation.`;
+  return `LIVE ORDER LOOKUP (this OVERRIDES guardrail 7 about emailing info@bootink.com for this email):
+You have tools to fetch real Shopify order and tracking data. When the customer asks about their order status, shipping, tracking, delivery, or a damaged/missing item, CALL the appropriate tool and answer directly from the result instead of deflecting to info@bootink.com. ${emailLine}
+If a lookup returns no order, then (and only then) fall back to asking them to confirm their order number or email.
+GREEN-FACT MARKERS: wrap every sentence that states a fact taken from the live order data (status, tracking number/carrier, item, date, total, address) in ⟦ ⟧ delimiters — e.g. "⟦Your order #17725 is paid and currently unfulfilled.⟧". Only wrap sentences containing live order facts; leave greetings, apologies, and generic text unwrapped. Never mention these markers to the customer.`;
+}
+
+type GeminiPart = {
+  text?: string;
+  functionCall?: { name: string; args?: Record<string, unknown> };
+  functionResponse?: { name: string; response: Record<string, unknown> };
+};
+type GeminiContent = { role: string; parts: GeminiPart[] };
+type GeminiCandidate = {
+  content?: { role?: string; parts?: GeminiPart[] };
+  finishReason?: string;
+};
+
 export async function generateReply(
   messages: ConversationMessage[],
   env: Env,
-  extraInstruction?: string
+  extraInstruction?: string,
+  opts?: { shopify?: { customerEmail?: string } }
 ): Promise<string> {
   const settings = await getGeminiSettings(env);
   const learnedBlock = buildLearnedBlock(await getApprovedCorrections(env));
+  const useShopify = !!opts?.shopify && shopifyConfigured(env);
 
   // Limit context to prevent overflow — keep most recent messages
   const recentMessages = messages.length > MAX_CONTEXT_MESSAGES
@@ -189,7 +262,7 @@ export async function generateReply(
     : messages;
 
   // Gemini requires contents to start with "user" role and alternate roles
-  let contents: { role: string; parts: { text: string }[] }[] = [];
+  let contents: GeminiContent[] = [];
   for (const m of recentMessages) {
     const role = m.sender === "user" ? "user" : "model";
     // Include translation as context so Gemini understands non-English messages
@@ -200,7 +273,7 @@ export async function generateReply(
     const last = contents[contents.length - 1];
     if (last && last.role === role) {
       // Merge consecutive same-role messages
-      last.parts[0].text += "\n" + text;
+      last.parts[0].text = (last.parts[0].text ?? "") + "\n" + text;
     } else {
       contents.push({ role, parts: [{ text }] });
     }
@@ -219,49 +292,69 @@ export async function generateReply(
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent`;
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": env.GEMINI_API_KEY,
-    },
-    body: JSON.stringify({
-      system_instruction: {
-        parts: [
-          {
-            text: [SYSTEM_PROMPT, learnedBlock, extraInstruction]
-              .filter(Boolean)
-              .join("\n\n"),
-          },
-        ],
+  const systemText = [
+    SYSTEM_PROMPT,
+    learnedBlock,
+    extraInstruction,
+    useShopify ? shopifyInstruction(opts?.shopify?.customerEmail) : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  // Function-calling loop: the model may ask to look up an order, we run it and
+  // feed the result back, then it produces the final reply. Cap the rounds so a
+  // misbehaving model can't loop forever. Without Shopify this runs once.
+  const MAX_TOOL_ROUNDS = 4;
+  for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": env.GEMINI_API_KEY,
       },
-      contents,
-      generationConfig: {
-        maxOutputTokens: 2048,
-        temperature: 0.3,
-      },
-    }),
-  });
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemText }] },
+        contents,
+        ...(useShopify ? { tools: SHOPIFY_TOOLS } : {}),
+        generationConfig: { maxOutputTokens: 2048, temperature: 0.3 },
+      }),
+    });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Gemini API error ${response.status}: ${err}`);
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`Gemini API error ${response.status}: ${err}`);
+    }
+
+    const data = (await response.json()) as Record<string, unknown>;
+    const candidates = data.candidates as GeminiCandidate[] | undefined;
+    if (!candidates || candidates.length === 0) {
+      throw new Error(`Gemini blocked response: ${JSON.stringify(data.promptFeedback)}`);
+    }
+
+    const content = candidates[0]?.content;
+    const parts = content?.parts || [];
+    const calls = parts.filter((p): p is Required<Pick<GeminiPart, "functionCall">> => !!p.functionCall);
+
+    // The model wants order data — run each call, append the results, loop.
+    if (useShopify && calls.length > 0 && round < MAX_TOOL_ROUNDS) {
+      contents.push({ role: "model", parts });
+      const responseParts: GeminiPart[] = [];
+      for (const c of calls) {
+        const result = await runShopifyTool(env, c.functionCall.name, c.functionCall.args || {});
+        responseParts.push({ functionResponse: { name: c.functionCall.name, response: result } });
+      }
+      contents.push({ role: "user", parts: responseParts });
+      continue;
+    }
+
+    const text = parts.map((p) => p.text).filter(Boolean).join("");
+    if (!text) {
+      throw new Error(`Gemini empty response, finishReason: ${candidates[0]?.finishReason}`);
+    }
+    return text;
   }
 
-  const data = (await response.json()) as Record<string, unknown>;
-  const candidates = data.candidates as { content?: { parts?: { text?: string }[] }; finishReason?: string }[] | undefined;
-
-  if (!candidates || candidates.length === 0) {
-    const blockReason = (data as Record<string, unknown>).promptFeedback;
-    throw new Error(`Gemini blocked response: ${JSON.stringify(blockReason)}`);
-  }
-
-  const text = candidates[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error(`Gemini empty response, finishReason: ${candidates[0]?.finishReason}`);
-  }
-
-  return text;
+  throw new Error("Gemini exceeded the tool-call round limit without a reply");
 }
 
 export async function detectLanguage(

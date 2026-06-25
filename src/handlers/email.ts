@@ -155,7 +155,12 @@ Kind regards,
 
 Still reply in the customer's language. Do not add a name or signature after "Kind regards,". Do not include a subject line or any text outside this format.`;
 
-    const suggestion = await generateReply(messages, env, emailInstruction);
+    // Give the AI the customer's email so it can pull their live Shopify orders
+    // (Feature 3) instead of deflecting order questions to info@bootink.com.
+    const customerEmail = emailFromHeader(detail.replyTo || firstCustomer?.from || "");
+    const suggestion = await generateReply(messages, env, emailInstruction, {
+      shopify: { customerEmail },
+    });
     return jsonResponse({ suggestion, subject: detail.subject });
   } catch (error) {
     await cerr(env, "Suggest email reply error:", error);
@@ -287,6 +292,13 @@ export async function handleSendEmailReply(
     await cerr(env, "Send email reply error:", error);
     return jsonResponse({ error: "Failed to send reply" }, 500);
   }
+}
+
+// "Jane Doe <jane@x.com>" -> "jane@x.com"; bare address -> itself; else "".
+function emailFromHeader(from: string): string {
+  const m = from.match(/<([^>]+)>/);
+  const addr = (m ? m[1] : from).trim().toLowerCase();
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr) ? addr : "";
 }
 
 // "Jane Doe <jane@x.com>" -> "Jane"; falls back to "there" for bare/blank addresses.

@@ -85,6 +85,19 @@ interface EmailSummary {
   snippet: string;
 }
 
+interface ShopifyOrder {
+  name: string;
+  createdAt: string;
+  financialStatus: string;
+  fulfillmentStatus: string;
+  customerName: string;
+  email: string;
+  totalPrice: string;
+  lineItems: { title: string; quantity: number }[];
+  tracking: { company?: string; number?: string; url?: string }[];
+  shippingCountry?: string;
+}
+
 function ts(d: string): number {
   const t = Date.parse(d);
   return isNaN(t) ? 0 : t;
@@ -101,6 +114,35 @@ function relTime(ms: number): string {
   const day = Math.floor(hr / 24);
   if (day < 7) return `${day}d`;
   return new Date(ms).toLocaleDateString();
+}
+
+// "Jane Doe <jane@x.com>" -> "jane@x.com"; bare address -> itself.
+function extractEmail(raw: string): string {
+  const m = raw.match(/<([^>]+)>/);
+  return (m ? m[1] : raw).trim().toLowerCase();
+}
+
+// The AI wraps Shopify-derived facts in ⟦ ⟧ (Feature 3). Strip the markers for
+// the plain text we send; render them as green spans inside the editable box.
+function stripGreenMarkers(s: string): string {
+  return s.replace(/⟦|⟧/g, "");
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Turn a ⟦…⟧-marked draft into HTML for the contentEditable box: order facts in
+// green, everything else plain. Newlines are preserved by the box's pre-wrap.
+function buildEditorHtml(marked: string): string {
+  return marked
+    .split(/(⟦[^⟧]*⟧)/)
+    .map((seg) =>
+      seg.startsWith("⟦") && seg.endsWith("⟧")
+        ? `<span style="color:#15803d;font-weight:600">${escapeHtml(seg.slice(1, -1))}</span>`
+        : escapeHtml(seg)
+    )
+    .join("");
 }
 
 export function Inbox() {
@@ -120,6 +162,13 @@ export function Inbox() {
   const [threadSubject, setThreadSubject] = useState("");
   const [threadTitle, setThreadTitle] = useState("");
   const [threadLang, setThreadLang] = useState("");
+
+  // Shopify order lookup (Feature 1 — agent-driven, in the thread pane)
+  const [ordersOpen, setOrdersOpen] = useState(false);
+  const [orderQuery, setOrderQuery] = useState("");
+  const [orderLoading, setOrderLoading] = useState(false);
+  const [orderError, setOrderError] = useState("");
+  const [orderResults, setOrderResults] = useState<ShopifyOrder[]>([]);
   const [autoReply, setAutoReply] = useState(false);
   const [windowExpired, setWindowExpired] = useState(false);
   const [loadingThread, setLoadingThread] = useState(false);
@@ -134,8 +183,20 @@ export function Inbox() {
   const [busyPending, setBusyPending] = useState<string | null>(null);
 
   const endRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+
+  // The reply box is a contentEditable div (so Shopify facts can render green).
+  // It's uncontrolled — we write to its DOM only on programmatic changes (AI
+  // draft, clear) and read innerText back into `draft` on input, so typing
+  // never resets the cursor. Pass marked text to show green, plain to clear.
+  function setEditorContent(text: string, marked = false) {
+    if (editorRef.current) {
+      editorRef.current.innerHTML = marked ? buildEditorHtml(text) : escapeHtml(text);
+    }
+    setDraft(stripGreenMarkers(text));
+  }
 
   // ── Data fetching ─────────────────────────────────────────────────────────
   const fetchIg = useCallback(async () => {
@@ -288,6 +349,15 @@ export function Inbox() {
           setThreadSubject(data.subject || "");
           const lastCustomer = [...(data.messages || [])].reverse().find((m: EmailMessage) => !m.fromUs);
           setThreadTitle(lastCustomer?.fromName || emailThreads.find((t) => t.threadId === sel.id)?.fromName || "Email");
+          // Prefill the Shopify lookup with the customer's email address, and on
+          // the initial open auto-show their recent orders (Feature 2). Skip on
+          // silent poll refreshes so we don't re-fetch on every tick.
+          const custEmail = extractEmail(data.replyTo || "");
+          setOrderQuery(custEmail);
+          if (!silent && custEmail.includes("@")) {
+            setOrdersOpen(true);
+            lookupOrders(custEmail);
+          }
           setThreadLang("");
           setAutoReply(false);
           setWindowExpired(false);
@@ -309,9 +379,46 @@ export function Inbox() {
     setSelected(sel);
     setIgMessages([]);
     setEmailMessages([]);
-    setDraft("");
+    setEditorContent("");
     setAiSuggestion(null);
+    // Reset the order panel. The query is prefilled with the customer email
+    // once the email thread loads (see loadThread); IG threads stay blank.
+    setOrdersOpen(false);
+    setOrderResults([]);
+    setOrderError("");
+    setOrderQuery("");
     loadThread(sel);
+  }
+
+  // Treat a query with an "@" as an email lookup, otherwise an order number.
+  // Accepts an explicit query (Feature 2 auto-lookup passes the customer email
+  // before the orderQuery state has committed); falls back to the input value.
+  async function lookupOrders(queryArg?: string) {
+    const q = (queryArg ?? orderQuery).trim();
+    if (!q || orderLoading) return;
+    setOrderLoading(true);
+    setOrderError("");
+    setOrderResults([]);
+    try {
+      const url = q.includes("@")
+        ? `/api/shopify/orders?email=${encodeURIComponent(q)}`
+        : `/api/shopify/order?name=${encodeURIComponent(q)}`;
+      const res = await fetch(url);
+      if (res.status === 404) {
+        setOrderError("No order found.");
+      } else if (!res.ok) {
+        setOrderError("Lookup failed.");
+      } else {
+        const data = await res.json();
+        const orders: ShopifyOrder[] = data.orders || (data.order ? [data.order] : []);
+        if (!orders.length) setOrderError("No orders found.");
+        setOrderResults(orders);
+      }
+    } catch {
+      setOrderError("Network error.");
+    } finally {
+      setOrderLoading(false);
+    }
   }
 
   // ── Composer actions ────────────────────────────────────────────────────
@@ -326,8 +433,10 @@ export function Inbox() {
       const res = await fetch(url, { method: "POST" });
       const data = await res.json();
       if (res.ok && data.suggestion) {
-        setDraft(data.suggestion);
-        setAiSuggestion(data.suggestion);
+        const raw: string = data.suggestion;
+        // Render green when the AI cited live order data (⟦…⟧), else plain.
+        setEditorContent(raw, raw.includes("⟦"));
+        setAiSuggestion(stripGreenMarkers(raw));
       } else {
         toast(data.error || "Auto Draft failed");
       }
@@ -354,7 +463,7 @@ export function Inbox() {
         timestamp: new Date().toISOString(),
       };
       setIgMessages((p) => [...p, optimistic]);
-      setDraft("");
+      setEditorContent("");
       try {
         const res = await fetch(`/api/conversations/${encodeURIComponent(selected.id)}/reply`, {
           method: "POST",
@@ -368,7 +477,7 @@ export function Inbox() {
             loadThread(selected, true);
           } else {
             setIgMessages((p) => p.filter((m) => m.id !== optimistic.id));
-            setDraft(text);
+            setEditorContent(text);
             toast(body.error || "Send failed");
           }
         } else {
@@ -376,7 +485,7 @@ export function Inbox() {
         }
       } catch {
         setIgMessages((p) => p.filter((m) => m.id !== optimistic.id));
-        setDraft(text);
+        setEditorContent(text);
         toast("Network error — message not sent");
       } finally {
         setSending(false);
@@ -391,7 +500,7 @@ export function Inbox() {
         const body = await res.json().catch(() => ({}));
         if (res.ok) {
           toast("Email sent", "success");
-          setDraft("");
+          setEditorContent("");
           setEmailMessages((p) => [
             ...p,
             { fromUs: true, fromName: "You", text, date: new Date().toISOString() },
@@ -706,11 +815,80 @@ export function Inbox() {
                     {autoReply ? "AI auto ON" : "AI auto OFF"}
                   </button>
                 )}
+                <button
+                  onClick={() => setOrdersOpen((o) => !o)}
+                  style={{ ...styles.autoBtn, ...(ordersOpen ? styles.autoBtnOn : {}) }}
+                >
+                  🛍 Orders
+                </button>
                 <button onClick={handleArchive} style={styles.doneBtn}>
                   ✓ Done
                 </button>
               </div>
             </header>
+
+            {ordersOpen && (
+              <div style={styles.ordersPanel}>
+                <div style={styles.ordersInputRow}>
+                  <input
+                    style={styles.ordersInput}
+                    placeholder="Order # or email"
+                    value={orderQuery}
+                    onChange={(e) => setOrderQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && lookupOrders()}
+                  />
+                  <button
+                    onClick={() => lookupOrders()}
+                    disabled={orderLoading || !orderQuery.trim()}
+                    style={styles.ordersBtn}
+                  >
+                    {orderLoading ? "…" : "Look up"}
+                  </button>
+                </div>
+                {orderError && <div style={styles.ordersError}>{orderError}</div>}
+                {orderResults.map((o) => (
+                  <div key={o.name} style={styles.orderCard}>
+                    <div style={styles.orderTop}>
+                      <span style={styles.orderName}>{o.name}</span>
+                      <span style={styles.orderStatus}>
+                        {o.fulfillmentStatus} · {o.financialStatus}
+                      </span>
+                    </div>
+                    <div style={styles.orderMeta}>
+                      {o.customerName}
+                      {o.totalPrice ? ` · ${o.totalPrice}` : ""}
+                      {o.shippingCountry ? ` · ${o.shippingCountry}` : ""}
+                      {o.createdAt ? ` · ${new Date(o.createdAt).toLocaleDateString()}` : ""}
+                    </div>
+                    {o.lineItems.length > 0 && (
+                      <div style={styles.orderItems}>
+                        {o.lineItems.map((li, i) => (
+                          <div key={i}>
+                            {li.quantity}× {li.title}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {o.tracking.length > 0 && (
+                      <div style={styles.orderTracking}>
+                        {o.tracking.map((t, i) => (
+                          <div key={i}>
+                            {t.company ? `${t.company}: ` : "Tracking: "}
+                            {t.url ? (
+                              <a href={t.url} target="_blank" rel="noreferrer" style={styles.trackLink}>
+                                {t.number || "track"}
+                              </a>
+                            ) : (
+                              t.number || ""
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div style={styles.messages}>
               {loadingThread ? (
@@ -770,12 +948,19 @@ export function Inbox() {
                   24h window expired — manual reply only (Human Agent tag).
                 </div>
               )}
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder={selected.channel === "email" ? "Write a reply…" : "Type a message…"}
-                style={styles.textarea}
-                rows={selected.channel === "email" ? 5 : 3}
+              <div
+                ref={editorRef}
+                className="ce-editor"
+                contentEditable
+                suppressContentEditableWarning
+                data-placeholder={selected.channel === "email" ? "Write a reply…" : "Type a message…"}
+                onInput={(e) => setDraft(e.currentTarget.innerText)}
+                style={{
+                  ...styles.textarea,
+                  minHeight: selected.channel === "email" ? "7.5rem" : "4.5rem",
+                  whiteSpace: "pre-wrap",
+                  overflowY: "auto",
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey && selected.channel === "instagram") {
                     e.preventDefault();
@@ -944,6 +1129,21 @@ const styles: Record<string, React.CSSProperties> = {
   vipBadge: { fontSize: "0.6rem", fontWeight: 700, background: "#fde68a", color: "#92400e", padding: "1px 5px", borderRadius: "4px" },
   langBadge: { fontSize: "0.6rem", fontWeight: 700, background: "var(--surface-3)", color: "var(--text-muted)", padding: "1px 5px", borderRadius: "4px" },
   aiBadge: { fontSize: "0.6rem", fontWeight: 700, background: "#5e35b1", color: "#fff", padding: "1px 5px", borderRadius: "4px" },
+
+  // Shopify orders panel
+  ordersPanel: { padding: "0.75rem 1.25rem", borderBottom: `1px solid ${BORDER}`, background: "var(--surface-2)", display: "flex", flexDirection: "column", gap: "0.5rem" },
+  ordersInputRow: { display: "flex", gap: "0.5rem" },
+  ordersInput: { flex: 1, padding: "0.4rem 0.6rem", border: `1px solid ${BORDER}`, borderRadius: "6px", background: "var(--surface)", color: "var(--text)", fontSize: "0.85rem" },
+  ordersBtn: { padding: "0.4rem 0.9rem", border: "none", borderRadius: "6px", background: "#5b21b6", color: "#fff", fontWeight: 700, fontSize: "0.8rem", cursor: "pointer" },
+  ordersError: { fontSize: "0.8rem", color: "var(--text-muted)" },
+  orderCard: { border: `1px solid ${BORDER}`, borderRadius: "8px", padding: "0.6rem 0.75rem", background: "var(--surface)", display: "flex", flexDirection: "column", gap: "0.25rem" },
+  orderTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" },
+  orderName: { fontWeight: 700, fontSize: "0.9rem", color: "var(--text)" },
+  orderStatus: { fontSize: "0.7rem", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase" },
+  orderMeta: { fontSize: "0.78rem", color: "var(--text-muted)" },
+  orderItems: { fontSize: "0.78rem", color: "var(--text)", display: "flex", flexDirection: "column", gap: "0.1rem" },
+  orderTracking: { fontSize: "0.78rem", color: "var(--text)" },
+  trackLink: { color: "#5b21b6", fontWeight: 600 },
 
   // Thread pane
   thread: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 },
