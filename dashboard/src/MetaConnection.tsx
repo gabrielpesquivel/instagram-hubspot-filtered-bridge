@@ -108,10 +108,10 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: "0.75rem",
   },
   connectedBox: {
-    background: "#fff",
+    background: "var(--surface)",
     borderRadius: "6px",
     padding: "1.25rem",
-    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    boxShadow: "0 1px 4px var(--shadow)",
     borderLeft: "3px solid #4caf50",
   },
   accountRow: {
@@ -132,11 +132,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
   pageName: {
     fontSize: "0.85rem",
-    color: "#666",
+    color: "var(--text-muted)",
   },
   meta: {
     fontSize: "0.8rem",
-    color: "#999",
+    color: "var(--text-faint)",
     marginTop: "2px",
   },
   refreshWarning: {
@@ -155,23 +155,23 @@ const styles: Record<string, React.CSSProperties> = {
   disconnectBtn: {
     padding: "0.4rem 0.8rem",
     background: "none",
-    border: "1px solid #ccc",
+    border: "1px solid var(--border)",
     borderRadius: "4px",
     cursor: "pointer",
     fontSize: "0.8rem",
-    color: "#666",
+    color: "var(--text-muted)",
   },
   disconnectedBox: {
-    background: "#fff",
+    background: "var(--surface)",
     borderRadius: "6px",
     padding: "1.25rem",
-    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    boxShadow: "0 1px 4px var(--shadow)",
     borderLeft: "3px solid #ff9800",
     textAlign: "center" as const,
   },
   disconnectedText: {
     fontSize: "0.9rem",
-    color: "#666",
+    color: "var(--text-muted)",
     margin: "0 0 1rem 0",
   },
   connectBtn: {

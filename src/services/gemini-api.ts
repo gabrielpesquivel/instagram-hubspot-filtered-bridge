@@ -33,7 +33,7 @@ Guardrails:
 9. Customer tags us in a story or post → thank them, show appreciation for their support, then tell them we will be in touch shortly to give them a discount code.
 10. "Are you a scam?" or trust concerns → reassure them about our 11,000+ happy customers and our track record.
 11. Copyrighted material requests (logos, brand designs, etc.) → tell them they must own the rights to any design they want applied.
-12. If unsure whether we ship to a country, say: "For shipping availability to your location, please check the shipping policy on our website in our bio. If products appear as sold out, that indicates shipping is not currently available in your country."
+12. Shipping availability is defined by the ship-to country list further below — answer directly from it. If the customer's country is on the list, confirm we ship there (and give the delivery estimate if asked). If it is NOT on the list, use the not-available message below. Do not tell customers to "check the website" to find out if we ship to them.
 13. Discount requests → NEVER offer, promise, or agree to any discount. Reply with something like: "Sorry, we're unable to offer discounts on individual orders. For bulk or wholesale pricing, feel free to reach out to sales@bootink.com." Do not bend this rule regardless of how the customer asks.
 14. Alternative product questions (e.g. "Will this work on shin pads / helmets / other items?") → confirm that our transfers will work on any product as long as the material is not fabric.
 
@@ -50,20 +50,116 @@ Free Shipping Thresholds:
 - UK: orders over 24 GBP (~7 transfers)
 
 Shipping Info (for reference — do NOT paste this to customers, use it to answer questions):
+
+WE SHIP ONLY to the following countries. This list is definitive — if a country is on it we ship there; if it is NOT on it, we do not ship there:
+Australia, New Zealand, United States, Canada, United Kingdom, Austria, Belgium, Denmark, France, Germany, Iceland, Ireland, Italy, Monaco, Netherlands, Norway, Poland, Portugal, Spain, Sweden, Switzerland, Singapore, Hong Kong, Japan, South Korea.
+
+Delivery estimates (business days, after processing):
 - Australia & New Zealand: 3-6 business days
-- USA, Canada: 6-10 business days
-- United Kingdom: 6-10 business days
-- EU Zone 1 (Austria, Belgium, Czechia, France, Germany, Hungary, Ireland, Italy, Luxembourg, Netherlands, Poland, Portugal, Spain, Sweden): 6-10 business days
-- EU Zone 2 (Bulgaria, Croatia, Denmark, Estonia, Finland, Greece, Latvia, Lithuania, Romania, Slovakia, Slovenia): 6-10 business days
-- Rest of Europe: 6-12 business days
-- Asia & Rest of World (Japan, Hong Kong, Indonesia, Malaysia, Philippines, Singapore, South Korea, Taiwan, Thailand, Cyprus): 6-12 business days
+- USA, Canada, United Kingdom: 6-10 business days
+- Europe (Austria, Belgium, Denmark, France, Germany, Iceland, Ireland, Italy, Monaco, Netherlands, Norway, Poland, Portugal, Spain, Sweden, Switzerland): 6-12 business days
+- Asia (Singapore, Hong Kong, Japan, South Korea): 6-12 business days
 - Processing time: 5 business days due to demand
 - Business days: Monday-Friday (AEDT), excluding Australian public holidays
-- We do NOT ship to: India, Mexico, or any country in South America.
-- If a country is not listed above, we likely do not ship there. Say: "Sorry, it appears we do not ship to that location at this point in time. We are actively working to increase our shipping destinations and will put out an announcement when that is possible."`;
+
+For ANY country not on the ship-to list above, we do not ship there. Reply: "Sorry, it appears we do not ship to that location at this point in time. We are actively working to increase our shipping destinations and will put out an announcement when that is possible."`;
 
 export interface GeminiSettings {
   model: string;
+}
+
+// ── Self-improving loop ──────────────────────────────────────────────────────
+// When an agent edits an Auto Draft before sending, we capture the (draft →
+// corrected) pair as a PENDING lesson. Pending lessons do nothing until the
+// agent approves them in Settings → AI; approved lessons are fed back into the
+// prompt so the model mirrors the agent's preferred wording over time.
+const PENDING_KEY = "ai_corrections_pending";
+const APPROVED_KEY = "ai_corrections_approved";
+const MAX_PENDING = 50;
+const MAX_APPROVED = 40;
+const MAX_PROMPT_CORRECTIONS = 12;
+const CORRECTION_FIELD_CHARS = 280;
+
+export interface Correction {
+  id: string;
+  at: string;
+  customer: string;
+  draft: string;
+  corrected: string;
+}
+
+function clip(s: string): string {
+  const t = s.trim();
+  return t.length > CORRECTION_FIELD_CHARS ? t.slice(0, CORRECTION_FIELD_CHARS) + "…" : t;
+}
+
+function normalize(s: string): string {
+  return s.trim().replace(/\s+/g, " ");
+}
+
+export async function getPendingCorrections(env: Env): Promise<Correction[]> {
+  return ((await env.PROFILE_CACHE.get(PENDING_KEY, "json")) as Correction[]) || [];
+}
+
+export async function getApprovedCorrections(env: Env): Promise<Correction[]> {
+  return ((await env.PROFILE_CACHE.get(APPROVED_KEY, "json")) as Correction[]) || [];
+}
+
+/** Capture an agent edit as a pending lesson (awaits approval before use). */
+export async function recordCorrection(
+  env: Env,
+  customer: string,
+  draft: string,
+  corrected: string
+): Promise<void> {
+  if (!draft || !corrected) return;
+  if (normalize(draft) === normalize(corrected)) return; // unedited — nothing to learn
+
+  const list = await getPendingCorrections(env);
+  list.push({
+    id: crypto.randomUUID(),
+    at: new Date().toISOString(),
+    customer: clip(customer),
+    draft: clip(draft),
+    corrected: clip(corrected),
+  });
+  await env.PROFILE_CACHE.put(PENDING_KEY, JSON.stringify(list.slice(-MAX_PENDING)));
+}
+
+/** Approve a pending lesson — move it into the active (approved) set. */
+export async function approveCorrection(env: Env, id: string): Promise<void> {
+  const pending = await getPendingCorrections(env);
+  const item = pending.find((c) => c.id === id);
+  if (!item) return;
+  await env.PROFILE_CACHE.put(PENDING_KEY, JSON.stringify(pending.filter((c) => c.id !== id)));
+  const approved = await getApprovedCorrections(env);
+  approved.push(item);
+  await env.PROFILE_CACHE.put(APPROVED_KEY, JSON.stringify(approved.slice(-MAX_APPROVED)));
+}
+
+/** Reject a pending lesson — discard it. */
+export async function rejectCorrection(env: Env, id: string): Promise<void> {
+  const pending = await getPendingCorrections(env);
+  await env.PROFILE_CACHE.put(PENDING_KEY, JSON.stringify(pending.filter((c) => c.id !== id)));
+}
+
+/** Remove an already-approved lesson (e.g. if it turned out to be a bad one). */
+export async function deleteApprovedCorrection(env: Env, id: string): Promise<void> {
+  const approved = await getApprovedCorrections(env);
+  await env.PROFILE_CACHE.put(APPROVED_KEY, JSON.stringify(approved.filter((c) => c.id !== id)));
+}
+
+/** Build the prompt section that teaches the model from APPROVED lessons. */
+function buildLearnedBlock(corrections: Correction[]): string {
+  if (corrections.length === 0) return "";
+  const recent = corrections.slice(-MAX_PROMPT_CORRECTIONS);
+  const examples = recent
+    .map(
+      (c) =>
+        `Customer said: "${c.customer}"\nRejected draft: "${c.draft}"\nPreferred reply: "${c.corrected}"`
+    )
+    .join("\n---\n");
+  return `LEARNED FROM AGENT EDITS — A human reviewed and APPROVED these corrections to past AI drafts. The "Preferred reply" is the gold standard for tone, length, wording, and policy. When a similar situation comes up, answer in the style of the Preferred replies and avoid the patterns in the Rejected drafts. These corrections OVERRIDE the general guidance above when they conflict.\n\n${examples}`;
 }
 
 export async function getGeminiSettings(env: Env): Promise<GeminiSettings> {
@@ -85,6 +181,7 @@ export async function generateReply(
   extraInstruction?: string
 ): Promise<string> {
   const settings = await getGeminiSettings(env);
+  const learnedBlock = buildLearnedBlock(await getApprovedCorrections(env));
 
   // Limit context to prevent overflow — keep most recent messages
   const recentMessages = messages.length > MAX_CONTEXT_MESSAGES
@@ -130,7 +227,13 @@ export async function generateReply(
     },
     body: JSON.stringify({
       system_instruction: {
-        parts: [{ text: extraInstruction ? `${SYSTEM_PROMPT}\n\n${extraInstruction}` : SYSTEM_PROMPT }],
+        parts: [
+          {
+            text: [SYSTEM_PROMPT, learnedBlock, extraInstruction]
+              .filter(Boolean)
+              .join("\n\n"),
+          },
+        ],
       },
       contents,
       generationConfig: {

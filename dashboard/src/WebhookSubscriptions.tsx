@@ -116,10 +116,10 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: "0.75rem",
   },
   box: {
-    background: "#fff",
+    background: "var(--surface)",
     borderRadius: "6px",
     padding: "1.25rem",
-    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    boxShadow: "0 1px 4px var(--shadow)",
   },
   row: {
     display: "flex",
@@ -129,7 +129,7 @@ const styles: Record<string, React.CSSProperties> = {
   refreshBtn: {
     padding: "0.4rem 0.8rem",
     background: "none",
-    border: "1px solid #ccc",
+    border: "1px solid var(--border)",
     borderRadius: "4px",
     cursor: "pointer",
     fontSize: "0.8rem",
@@ -149,7 +149,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   appEntry: {
     padding: "0.5rem",
-    background: "#f8f9fa",
+    background: "var(--surface-2)",
     borderRadius: "4px",
     marginBottom: "0.5rem",
   },
@@ -159,12 +159,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   fields: {
     fontSize: "0.8rem",
-    color: "#666",
+    color: "var(--text-muted)",
     marginTop: "2px",
   },
   noSubscription: {
     fontSize: "0.85rem",
-    color: "#999",
+    color: "var(--text-faint)",
     fontStyle: "italic",
   },
   noConnection: {

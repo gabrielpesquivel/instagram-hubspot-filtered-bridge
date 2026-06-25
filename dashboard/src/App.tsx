@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Login } from "./Login";
 import { Dashboard } from "./Dashboard";
 import { ToolPicker } from "./ToolPicker";
-import { CustomerSupport } from "./CustomerSupport";
+import { InboxPage } from "./InboxPage";
 import { EmailManager } from "./EmailManager";
 import { Gangsheet } from "./Gangsheet";
 import { DmManager } from "./DmManager";
@@ -53,16 +53,7 @@ export function App() {
     window.location.hash = "#/support";
   };
 
-  if (tool === "support")
-    return (
-      <CustomerSupport
-        onLogout={logout}
-        onBack={goPicker}
-        onSelect={(t) => {
-          window.location.hash = `#/${t}`;
-        }}
-      />
-    );
+  if (tool === "support") return <InboxPage onLogout={logout} onBack={goPicker} />;
   if (tool === "email") return <EmailManager onLogout={logout} onBack={goSupport} />;
   if (tool === "bridge") return <Dashboard onLogout={logout} onBack={goSupport} />;
   if (tool === "dms")

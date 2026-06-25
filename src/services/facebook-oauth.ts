@@ -103,10 +103,15 @@ export async function exchangeCodeForToken(
 /**
  * Exchange short-lived token for long-lived token (~60 days)
  */
+// Facebook long-lived user tokens last ~60 days. When you exchange a token that
+// is ALREADY long-lived (our daily refresh), the response often omits
+// `expires_in` — so callers must fall back to this instead of trusting it.
+export const LONG_LIVED_TOKEN_TTL_SEC = 60 * 24 * 60 * 60; // 60 days
+
 export async function exchangeForLongLivedToken(
   shortToken: string,
   env: Env
-): Promise<{ access_token: string; expires_in: number } | null> {
+): Promise<{ access_token: string; expires_in?: number } | null> {
   const params = new URLSearchParams({
     grant_type: "fb_exchange_token",
     client_id: env.META_APP_ID,
@@ -125,7 +130,7 @@ export async function exchangeForLongLivedToken(
     }
     return (await res.json()) as {
       access_token: string;
-      expires_in: number;
+      expires_in?: number;
     };
   } catch (error) {
     await cerr(env, "Long-lived token exchange error:", error);
@@ -284,13 +289,17 @@ export async function refreshMetaTokenIfNeeded(env: Env): Promise<void> {
     return;
   }
 
+  // Refreshing an already-long-lived token usually returns no expires_in —
+  // fall back to the standard 60-day TTL so the stored expiry isn't NaN
+  // (which made the cron re-refresh every single day).
+  const ttlSec = refreshed.expires_in ?? LONG_LIVED_TOKEN_TTL_SEC;
   await storeConnection(
     page,
-    Date.now() + refreshed.expires_in * 1000,
+    Date.now() + ttlSec * 1000,
     env,
     refreshed.access_token
   );
-  await clog(env, `Meta token auto-refreshed — next expiry in ${Math.round(refreshed.expires_in / 86400)} days`);
+  await clog(env, `Meta token auto-refreshed — next expiry in ${Math.round(ttlSec / 86400)} days`);
 }
 
 /**

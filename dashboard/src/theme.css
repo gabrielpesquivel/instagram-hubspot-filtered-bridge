@@ -1,0 +1,48 @@
+/* Theme tokens. Inline styles reference these via var(--x); the [data-theme]
+   attribute on <html> swaps the whole palette. */
+:root {
+  --bg: #f5f5f5;
+  --surface: #ffffff;
+  --surface-2: #fafafa;
+  --surface-3: #f0f0f0;
+  --border: #e7e7ea;
+  --border-strong: #d8d8dc;
+  --text: #1a1a1a;
+  --text-muted: #888888;
+  --text-faint: #aaaaaa;
+  --shadow: rgba(0, 0, 0, 0.08);
+  --shadow-strong: rgba(0, 0, 0, 0.12);
+  --overlay: rgba(0, 0, 0, 0.35);
+  --accent: #2563eb;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f1115;
+  --surface: #1a1d23;
+  --surface-2: #20242b;
+  --surface-3: #2a2f38;
+  --border: #2c313a;
+  --border-strong: #3a414c;
+  --text: #e8e9ec;
+  --text-muted: #9aa0aa;
+  --text-faint: #6b727d;
+  --shadow: rgba(0, 0, 0, 0.45);
+  --shadow-strong: rgba(0, 0, 0, 0.6);
+  --overlay: rgba(0, 0, 0, 0.6);
+  --accent: #3b82f6;
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+/* Inputs/textareas with inherited theme colors should pick up the scheme. */
+input,
+textarea,
+button {
+  color-scheme: inherit;
+}

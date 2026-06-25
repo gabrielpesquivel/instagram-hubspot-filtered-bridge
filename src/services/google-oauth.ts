@@ -1,10 +1,17 @@
 import type { Env } from "../types";
 import { clog, cerr } from "./logger";
 
-// Read-only Gmail access — the tool only reads unread support mail and suggests
-// replies to copy/paste; it never sends. gmail.readonly also covers the profile
-// lookup used to show which inbox is connected.
-const OAUTH_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+// Gmail access for the unified inbox: read support mail, send replies, and
+// mark threads read/archived. gmail.modify covers all read + label operations
+// (and the profile lookup that names the connected inbox); gmail.send is a
+// separate scope required to actually deliver a reply. Bumping past the old
+// gmail.readonly scope means existing connections must reconnect once.
+const OAUTH_SCOPE = [
+  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/gmail.send",
+  // Read the account's send-as signature so replies can reuse it automatically.
+  "https://www.googleapis.com/auth/gmail.settings.basic",
+].join(" ");
 const KV_KEY = "google_connection";
 const STATE_PREFIX = "google_oauth_state:";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";

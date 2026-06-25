@@ -16,6 +16,7 @@ import {
   generateReply,
   getGeminiSettings,
   saveGeminiSettings,
+  recordCorrection,
 } from "../services/gemini-api";
 import { incrementStat, appendLog } from "../services/stats";
 
@@ -63,7 +64,7 @@ export async function handleReplyConversation(
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
 
-  let body: { text?: string };
+  let body: { text?: string; aiSuggestion?: string };
   try {
     body = await request.json();
   } catch {
@@ -78,6 +79,12 @@ export async function handleReplyConversation(
 
   // Check if 24h window expired — use HUMAN_AGENT tag if so
   const conv0 = await getConversation(senderId, env);
+
+  // Self-improving loop: if this reply was an edited Auto Draft, learn the delta.
+  if (body.aiSuggestion && conv0) {
+    const lastCustomer = [...conv0.messages].reverse().find((m) => m.sender === "user");
+    await recordCorrection(env, lastCustomer?.text || "", body.aiSuggestion, text);
+  }
   const expired = conv0 ? isWindowExpired(conv0.messages) : false;
 
   // Send via Instagram
@@ -143,6 +150,36 @@ export async function handleRetryMessage(
   }, env);
 
   return jsonResponse({ ok: true });
+}
+
+/** Generate an AI reply for a conversation WITHOUT sending it — the agent edits
+ *  it in the composer and sends manually. Mirrors the email suggest flow so the
+ *  unified inbox composer behaves the same on both channels. */
+export async function handleSuggestConversationReply(
+  request: Request,
+  env: Env,
+  senderId: string
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+  if (!env.GEMINI_API_KEY) {
+    return jsonResponse({ error: "Gemini API key not configured" }, 400);
+  }
+
+  const conv = await getConversation(senderId, env);
+  if (!conv || conv.messages.length === 0) {
+    return jsonResponse({ error: "No messages to generate reply for" }, 400);
+  }
+
+  try {
+    const suggestion = await generateReply(conv.messages, env);
+    return jsonResponse({ suggestion });
+  } catch (error) {
+    return jsonResponse({
+      error: `Generation failed: ${error instanceof Error ? error.message : String(error)}`,
+    }, 500);
+  }
 }
 
 export async function handleGenerateAndSendReply(

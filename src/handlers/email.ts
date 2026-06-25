@@ -1,7 +1,7 @@
 import type { Env, ConversationMessage } from "../types";
 import { isAuthenticated, jsonResponse } from "../utils/auth";
 import { cerr } from "../services/logger";
-import { generateReply } from "../services/gemini-api";
+import { generateReply, recordCorrection } from "../services/gemini-api";
 import {
   generateGoogleAuthUrl,
   validateGoogleState,
@@ -12,7 +12,13 @@ import {
   clearGoogleConnection,
   getValidGoogleToken,
 } from "../services/google-oauth";
-import { listUnreadThreads, getThreadDetail } from "../services/gmail-api";
+import {
+  listUnreadThreads,
+  getThreadDetail,
+  sendThreadReply,
+  markThreadRead,
+  getSendAsSignature,
+} from "../services/gmail-api";
 
 /** Initiate Google OAuth — validate session, then redirect to Google consent. */
 export async function handleGoogleAuthInit(request: Request, env: Env): Promise<Response> {
@@ -154,6 +160,132 @@ Still reply in the customer's language. Do not add a name or signature after "Ki
   } catch (error) {
     await cerr(env, "Suggest email reply error:", error);
     return jsonResponse({ error: "Failed to generate suggestion" }, 500);
+  }
+}
+
+const SIGNATURE_KEY = "email_signature";
+const USE_GMAIL_SIG_KEY = "email_use_gmail_sig";
+
+/** Get the saved manual signature + whether to use the Gmail signature instead. */
+export async function handleGetEmailSignature(request: Request, env: Env): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) return jsonResponse({ error: "Unauthorized" }, 401);
+  const signature = (await env.PROFILE_CACHE.get(SIGNATURE_KEY)) || "";
+  const useGmail = (await env.PROFILE_CACHE.get(USE_GMAIL_SIG_KEY)) === "true";
+  return jsonResponse({ signature, useGmail });
+}
+
+/** Save the manual signature and/or the "use my Gmail signature" preference. */
+export async function handleSetEmailSignature(request: Request, env: Env): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) return jsonResponse({ error: "Unauthorized" }, 401);
+  const body = (await request.json().catch(() => ({}))) as { signature?: string; useGmail?: boolean };
+  if (body.signature !== undefined) await env.PROFILE_CACHE.put(SIGNATURE_KEY, body.signature);
+  if (body.useGmail !== undefined) await env.PROFILE_CACHE.put(USE_GMAIL_SIG_KEY, body.useGmail ? "true" : "false");
+  return jsonResponse({ ok: true });
+}
+
+// Escape text and turn newlines into <br> so a plain-text draft renders in an
+// HTML email (used when appending the HTML Gmail signature).
+function textToHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br>");
+}
+
+/** Full thread for the unified inbox thread view: messages + reply subject. */
+export async function handleGetEmailThread(
+  request: Request,
+  env: Env,
+  threadId: string
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) return jsonResponse({ error: "Unauthorized" }, 401);
+  const conn = await getGoogleConnection(env);
+  const token = await getValidGoogleToken(env);
+  if (!conn || !token) return jsonResponse({ error: "Gmail not connected" }, 409);
+
+  try {
+    const detail = await getThreadDetail(token, threadId, conn.email);
+    if (!detail) return jsonResponse({ error: "Thread not found" }, 404);
+    return jsonResponse({
+      threadId,
+      subject: detail.subject,
+      replyTo: detail.replyTo,
+      messages: detail.messages.map((m) => ({
+        fromUs: m.fromUs,
+        fromName: firstNameFrom(m.from),
+        text: m.text,
+        date: m.date,
+      })),
+    });
+  } catch (error) {
+    await cerr(env, "Get email thread error:", error);
+    return jsonResponse({ error: "Failed to load thread" }, 500);
+  }
+}
+
+/** Send an agent's reply into a Gmail thread, then mark the thread read. */
+export async function handleSendEmailReply(
+  request: Request,
+  env: Env,
+  threadId: string
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) return jsonResponse({ error: "Unauthorized" }, 401);
+  const conn = await getGoogleConnection(env);
+  const token = await getValidGoogleToken(env);
+  if (!conn || !token) return jsonResponse({ error: "Gmail not connected" }, 409);
+
+  const body = (await request.json().catch(() => ({}))) as { text?: string; aiSuggestion?: string };
+  const text = (body.text || "").trim();
+  if (!text) return jsonResponse({ error: "Empty reply" }, 400);
+
+  const useGmailSig = (await env.PROFILE_CACHE.get(USE_GMAIL_SIG_KEY)) === "true";
+
+  // Build the body + signature. Gmail signatures are HTML, so when that mode is
+  // on we send an HTML email; otherwise we append the manual plain-text one.
+  let emailBody = text;
+  let html = false;
+  if (useGmailSig) {
+    const sigHtml = (await getSendAsSignature(token, conn.email)).trim();
+    emailBody = sigHtml ? `${textToHtml(text)}<br><br>${sigHtml}` : textToHtml(text);
+    html = true;
+  } else {
+    const signature = ((await env.PROFILE_CACHE.get(SIGNATURE_KEY)) || "").trim();
+    if (signature && !text.includes(signature)) emailBody = `${text}\n\n${signature}`;
+  }
+
+  try {
+    const detail = await getThreadDetail(token, threadId, conn.email);
+    if (!detail) return jsonResponse({ error: "Thread not found" }, 404);
+    if (!detail.replyTo) return jsonResponse({ error: "No recipient to reply to" }, 400);
+
+    const messageId = await sendThreadReply(token, {
+      threadId,
+      to: detail.replyTo,
+      fromEmail: conn.email,
+      subject: detail.subject,
+      inReplyTo: detail.inReplyTo,
+      references: detail.references,
+      body: emailBody,
+      html,
+    });
+    if (!messageId) {
+      return jsonResponse({ error: "Gmail rejected the message" }, 502);
+    }
+
+    // Self-improving loop: learn from an edited Auto Draft (compare to raw text,
+    // not the signature-appended body).
+    if (body.aiSuggestion) {
+      const lastCustomer = [...detail.messages].reverse().find((m) => !m.fromUs);
+      await recordCorrection(env, lastCustomer?.text || detail.subject, body.aiSuggestion, text);
+    }
+
+    // Best-effort: clear the unread flag so it drops out of the queue.
+    await markThreadRead(token, threadId).catch(() => {});
+    return jsonResponse({ ok: true, messageId });
+  } catch (error) {
+    await cerr(env, "Send email reply error:", error);
+    return jsonResponse({ error: "Failed to send reply" }, 500);
   }
 }
 

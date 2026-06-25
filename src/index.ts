@@ -25,6 +25,7 @@ import {
   handleGetConversations,
   handleGetConversation,
   handleReplyConversation,
+  handleSuggestConversationReply,
   handleGenerateAndSendReply,
   handleRetryMessage,
   handleArchiveConversation,
@@ -56,12 +57,22 @@ import {
   handleDeleteFile,
 } from "./handlers/files";
 import {
+  handleListInstagramUnread,
+  handleGetInstagramThread,
+  handleMarkInstagramDone,
+} from "./handlers/instagram-inbox";
+import { handleGetCorrections, handleCorrectionAction } from "./handlers/ai";
+import {
   handleGoogleAuthInit,
   handleGoogleCallback,
   handleGetEmailConnection,
   handleDisconnectEmail,
   handleGetEmailThreads,
   handleSuggestEmailReply,
+  handleSendEmailReply,
+  handleGetEmailThread,
+  handleGetEmailSignature,
+  handleSetEmailSignature,
 } from "./handlers/email";
 
 export default {
@@ -156,6 +167,9 @@ export default {
       if (action === "reply" && request.method === "POST") {
         return handleReplyConversation(request, env, senderId);
       }
+      if (action === "suggest" && request.method === "POST") {
+        return handleSuggestConversationReply(request, env, senderId);
+      }
       if (action === "generate" && request.method === "POST") {
         return handleGenerateAndSendReply(request, env, senderId);
       }
@@ -216,9 +230,43 @@ export default {
     if (path === "/api/email/threads" && request.method === "GET") {
       return handleGetEmailThreads(request, env);
     }
+    if (path === "/api/email/signature" && request.method === "GET") {
+      return handleGetEmailSignature(request, env);
+    }
+    if (path === "/api/email/signature" && request.method === "POST") {
+      return handleSetEmailSignature(request, env);
+    }
     const emailSuggestMatch = path.match(/^\/api\/email\/threads\/([^/]+)\/suggest$/);
     if (emailSuggestMatch && request.method === "POST") {
       return handleSuggestEmailReply(request, env, decodeURIComponent(emailSuggestMatch[1]));
+    }
+    const emailReplyMatch = path.match(/^\/api\/email\/threads\/([^/]+)\/reply$/);
+    if (emailReplyMatch && request.method === "POST") {
+      return handleSendEmailReply(request, env, decodeURIComponent(emailReplyMatch[1]));
+    }
+    const emailThreadMatch = path.match(/^\/api\/email\/threads\/([^/]+)$/);
+    if (emailThreadMatch && request.method === "GET") {
+      return handleGetEmailThread(request, env, decodeURIComponent(emailThreadMatch[1]));
+    }
+
+    // AI learned-corrections review
+    if (path === "/api/ai/corrections" && request.method === "GET") {
+      return handleGetCorrections(request, env);
+    }
+    if (path === "/api/ai/corrections/action" && request.method === "POST") {
+      return handleCorrectionAction(request, env);
+    }
+
+    // Instagram pull (live unread DMs, like the email list)
+    if (path === "/api/instagram/unread" && request.method === "GET") {
+      return handleListInstagramUnread(request, env);
+    }
+    if (path === "/api/instagram/done" && request.method === "POST") {
+      return handleMarkInstagramDone(request, env);
+    }
+    const igThreadMatch = path.match(/^\/api\/instagram\/threads\/([^/]+)$/);
+    if (igThreadMatch && request.method === "GET") {
+      return handleGetInstagramThread(request, env, decodeURIComponent(igThreadMatch[1]));
     }
 
     // Filter settings

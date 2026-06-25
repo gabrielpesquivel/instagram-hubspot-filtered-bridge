@@ -1,5 +1,6 @@
 import { FileCalendar } from "./FileCalendar";
 import { TodoList } from "./TodoList";
+import { ThemeToggle } from "./ThemeToggle";
 
 interface ToolPickerProps {
   onSelect: (tool: "support" | "gangsheet") => void;
@@ -9,37 +10,31 @@ interface ToolPickerProps {
 export function ToolPicker({ onSelect, onLogout }: ToolPickerProps) {
   return (
     <div style={styles.container}>
-      <div style={styles.topbar}>
+      {/* Typical header: logo + tabs inline, theme + logout on the right */}
+      <header style={styles.header}>
         <img src="/logo.png" alt="BootInk" style={styles.logo} />
-        <button onClick={onLogout} style={styles.logoutBtn}>
-          Log out
-        </button>
-      </div>
+        <nav style={styles.tabBar}>
+          <button style={styles.tab} onClick={() => onSelect("gangsheet")}>
+            Gangsheet Generator
+          </button>
+          <button style={styles.tab} onClick={() => onSelect("support")}>
+            Customer Support
+          </button>
+        </nav>
+        <div style={styles.headerRight}>
+          <ThemeToggle />
+          <button onClick={onLogout} style={styles.logoutBtn}>
+            Log out
+          </button>
+        </div>
+      </header>
 
       <div style={styles.columns}>
-        {/* Left: daily gangsheet calendar, with the tools underneath */}
+        {/* Left: daily gangsheet calendar */}
         <section style={styles.left}>
           <h2 style={styles.colTitle}>Daily Gangsheets</h2>
           <p style={styles.colSub}>Upload, replace or delete the gangsheets for each work day</p>
           <FileCalendar />
-
-          <h2 style={{ ...styles.colTitle, marginTop: "2rem" }}>Tools</h2>
-          <p style={styles.colSub}>Pick a tool to get started</p>
-          <div style={styles.grid}>
-            <button style={styles.card} onClick={() => onSelect("gangsheet")}>
-              <span style={styles.cardName}>Gangsheet Generator</span>
-              <span style={styles.cardDesc}>
-                Turn Shopify order CSVs into print-ready gangsheet PDF/AI files
-              </span>
-            </button>
-
-            <button style={styles.card} onClick={() => onSelect("support")}>
-              <span style={styles.cardName}>Customer Support Tools</span>
-              <span style={styles.cardDesc}>
-                Email Manager and Instagram DM Manager
-              </span>
-            </button>
-          </div>
         </section>
 
         {/* Right: daily to-do checklist */}
@@ -56,33 +51,56 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: "100vh",
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    background: "#f5f5f5",
+    background: "var(--bg)",
+    color: "var(--text)",
     padding: "1.5rem",
     boxSizing: "border-box" as const,
   },
-  topbar: {
-    position: "relative" as const,
+  header: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "flex-end",
-    minHeight: "60px",
-    marginBottom: "1.5rem",
+    gap: "1.5rem",
+    maxWidth: "1100px",
+    margin: "0 auto 1.75rem",
+    paddingBottom: "1rem",
+    borderBottom: "1px solid var(--border)",
   },
   logo: {
-    width: "180px",
+    width: "150px",
     height: "auto",
-    position: "absolute" as const,
-    left: "50%",
-    transform: "translateX(-50%)",
+    flexShrink: 0,
+  },
+  tabBar: {
+    display: "flex",
+    gap: "0.75rem",
+  },
+  tab: {
+    padding: "0.5rem 1.25rem",
+    background: "var(--surface)",
+    border: "1px solid var(--border)",
+    borderRadius: "999px",
+    cursor: "pointer",
+    fontSize: "0.9rem",
+    fontWeight: 600,
+    color: "var(--text)",
+    boxShadow: "0 1px 3px var(--shadow)",
+    fontFamily: "inherit",
+  },
+  headerRight: {
+    marginLeft: "auto",
+    display: "flex",
+    alignItems: "center",
+    gap: "0.6rem",
+    flexShrink: 0,
   },
   logoutBtn: {
     padding: "0.4rem 1rem",
-    background: "none",
-    border: "1px solid #ccc",
-    borderRadius: "4px",
+    background: "var(--surface)",
+    border: "1px solid var(--border-strong)",
+    borderRadius: "8px",
     cursor: "pointer",
     fontSize: "0.8rem",
-    color: "#666",
+    color: "var(--text-muted)",
   },
   columns: {
     display: "grid",
@@ -94,8 +112,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   left: { minWidth: 0 },
   right: { minWidth: 0 },
-  colTitle: { margin: "0 0 0.25rem", fontSize: "1.25rem", color: "#222" },
-  colSub: { margin: "0 0 1rem", fontSize: "0.85rem", color: "#888" },
+  colTitle: { margin: "0 0 0.25rem", fontSize: "1.25rem", color: "var(--text)" },
+  colSub: { margin: "0 0 1rem", fontSize: "0.85rem", color: "var(--text-muted)" },
   grid: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",

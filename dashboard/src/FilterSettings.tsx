@@ -132,10 +132,10 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: "0.75rem",
   },
   box: {
-    background: "#fff",
+    background: "var(--surface)",
     borderRadius: "6px",
     padding: "1rem",
-    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    boxShadow: "0 1px 4px var(--shadow)",
   },
   field: {
     marginBottom: "0.25rem",
@@ -149,12 +149,12 @@ const styles: Record<string, React.CSSProperties> = {
   label: {
     fontSize: "0.8rem",
     fontWeight: 600,
-    color: "#555",
+    color: "var(--text-muted)",
   },
   value: {
     fontSize: "0.9rem",
     fontWeight: 700,
-    color: "#333",
+    color: "var(--text)",
     fontVariantNumeric: "tabular-nums",
   },
   slider: {
@@ -166,17 +166,17 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     justifyContent: "space-between",
     fontSize: "0.7rem",
-    color: "#999",
+    color: "var(--text-faint)",
     marginTop: "-2px",
   },
   hint: {
     fontSize: "0.75rem",
-    color: "#999",
+    color: "var(--text-faint)",
     marginTop: "4px",
   },
   divider: {
     height: "1px",
-    background: "#f0f0f0",
+    background: "var(--surface-2)",
     margin: "0.75rem 0",
   },
   toggleRow: {
@@ -203,7 +203,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: "18px",
     height: "18px",
     borderRadius: "50%",
-    background: "#fff",
+    background: "var(--surface)",
     transition: "transform 0.2s",
     boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
   },

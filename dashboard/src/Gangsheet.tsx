@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { ThemeToggle } from "./ThemeToggle";
 
 interface SheetJob {
   id: number;
@@ -269,9 +270,12 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
           </button>
           <img src="/logo.png" alt="BootInk" style={styles.topBarLogo} />
           <span style={styles.topBarTitle}>Gangsheet Generator</span>
-          <button onClick={onLogout} style={styles.logoutBtn}>
-            Log out
-          </button>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <ThemeToggle />
+            <button onClick={onLogout} style={styles.logoutBtn}>
+              Log out
+            </button>
+          </div>
         </div>
       </header>
 
@@ -366,18 +370,19 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
 const styles: Record<string, React.CSSProperties> = {
   wrapper: {
     minHeight: "100vh",
-    background: "#f5f5f5",
+    background: "var(--bg)",
+    color: "var(--text)",
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
   },
   topBar: {
-    background: "#fff",
-    borderBottom: "1px solid #e0e0e0",
+    background: "var(--surface)",
+    borderBottom: "1px solid var(--border)",
     padding: "0 1rem",
     position: "sticky" as const,
     top: 0,
     zIndex: 100,
-    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+    boxShadow: "0 1px 3px var(--shadow)",
   },
   topBarInner: {
     maxWidth: "900px",
@@ -395,27 +400,27 @@ const styles: Record<string, React.CSSProperties> = {
     transform: "translateX(-50%)",
     fontSize: "1.1rem",
     fontWeight: 600,
-    color: "#222",
+    color: "var(--text)",
     whiteSpace: "nowrap" as const,
   },
   backBtn: {
     padding: "0.4rem 1rem",
     background: "none",
-    border: "1px solid #ccc",
+    border: "1px solid var(--border)",
     borderRadius: "4px",
     cursor: "pointer",
     fontSize: "0.8rem",
-    color: "#666",
+    color: "var(--text-muted)",
   },
   logoutBtn: {
     marginLeft: "auto",
     padding: "0.4rem 1rem",
     background: "none",
-    border: "1px solid #ccc",
+    border: "1px solid var(--border)",
     borderRadius: "4px",
     cursor: "pointer",
     fontSize: "0.8rem",
-    color: "#666",
+    color: "var(--text-muted)",
   },
   page: {
     maxWidth: "900px",
@@ -434,12 +439,12 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "50%",
     flexShrink: 0,
   },
-  statusText: { fontSize: "0.85rem", color: "#555" },
+  statusText: { fontSize: "0.85rem", color: "var(--text-muted)" },
   dropZone: {
     display: "block",
     border: "2px dashed #bbb",
     borderRadius: "8px",
-    background: "#fff",
+    background: "var(--surface)",
     padding: "3rem 1rem",
     textAlign: "center" as const,
     cursor: "pointer",
@@ -447,15 +452,15 @@ const styles: Record<string, React.CSSProperties> = {
   },
   dropZoneActive: {
     borderColor: "#333",
-    background: "#fafafa",
+    background: "var(--surface-2)",
   },
-  dropTitle: { margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "#333" },
-  dropSub: { margin: "0.5rem 0 0", fontSize: "0.85rem", color: "#888" },
+  dropTitle: { margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--text)" },
+  dropSub: { margin: "0.5rem 0 0", fontSize: "0.85rem", color: "var(--text-muted)" },
   jobList: {
     marginTop: "1.25rem",
-    background: "#fff",
+    background: "var(--surface)",
     borderRadius: "8px",
-    boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+    boxShadow: "0 2px 8px var(--shadow)",
     overflow: "hidden",
   },
   jobRow: {
@@ -468,7 +473,7 @@ const styles: Record<string, React.CSSProperties> = {
   jobName: {
     fontSize: "0.95rem",
     fontWeight: 600,
-    color: "#222",
+    color: "var(--text)",
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap" as const,
@@ -492,30 +497,30 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     background: "none",
-    border: "1px solid #ddd",
+    border: "1px solid var(--border)",
     borderRadius: "50%",
     cursor: "pointer",
     fontSize: "0.75rem",
-    color: "#999",
+    color: "var(--text-faint)",
     lineHeight: 1,
   },
   logBox: {
     marginTop: "1.25rem",
-    background: "#fff",
+    background: "var(--surface)",
     borderRadius: "8px",
-    boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+    boxShadow: "0 2px 8px var(--shadow)",
     padding: "0.75rem 1rem",
   },
   logSummary: {
     cursor: "pointer",
     fontSize: "0.85rem",
-    color: "#555",
+    color: "var(--text-muted)",
     fontWeight: 600,
   },
   logPre: {
     margin: "0.75rem 0 0",
     fontSize: "0.75rem",
-    color: "#444",
+    color: "var(--text)",
     maxHeight: "240px",
     overflow: "auto",
     whiteSpace: "pre-wrap" as const,

@@ -129,10 +129,10 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: "0.75rem",
   },
   box: {
-    background: "#fff",
+    background: "var(--surface)",
     borderRadius: "6px",
     padding: "1rem",
-    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    boxShadow: "0 1px 4px var(--shadow)",
   },
   field: {
     marginBottom: "0.25rem",
@@ -140,12 +140,12 @@ const styles: Record<string, React.CSSProperties> = {
   label: {
     fontSize: "0.8rem",
     fontWeight: 600,
-    color: "#555",
+    color: "var(--text-muted)",
     marginBottom: "0.25rem",
   },
   hint: {
     fontSize: "0.75rem",
-    color: "#999",
+    color: "var(--text-faint)",
     marginTop: "2px",
     marginBottom: "6px",
   },
@@ -156,7 +156,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   divider: {
     height: "1px",
-    background: "#f0f0f0",
+    background: "var(--surface-2)",
     margin: "0.75rem 0",
   },
   toggleRow: {
@@ -183,7 +183,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: "18px",
     height: "18px",
     borderRadius: "50%",
-    background: "#fff",
+    background: "var(--surface)",
     transition: "transform 0.2s",
     boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
   },
@@ -194,13 +194,13 @@ const styles: Record<string, React.CSSProperties> = {
   },
   modelBtn: {
     padding: "0.3rem 0.6rem",
-    background: "#f0f0f0",
-    border: "1px solid #ddd",
+    background: "var(--surface-2)",
+    border: "1px solid var(--border)",
     borderRadius: "4px",
     cursor: "pointer",
     fontSize: "0.72rem",
     fontWeight: 500,
-    color: "#555",
+    color: "var(--text-muted)",
     transition: "all 0.15s",
   },
   modelBtnActive: {

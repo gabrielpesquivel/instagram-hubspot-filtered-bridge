@@ -6,6 +6,7 @@ import {
   validateOAuthState,
   exchangeCodeForToken,
   exchangeForLongLivedToken,
+  LONG_LIVED_TOKEN_TTL_SEC,
   fetchPagesAndInstagramAccounts,
   storeConnection,
   getConnection,
@@ -103,7 +104,7 @@ export async function handleFacebookCallback(
   }
 
   const userTokenExpiresAt =
-    Date.now() + longTokenResult.expires_in * 1000;
+    Date.now() + (longTokenResult.expires_in ?? LONG_LIVED_TOKEN_TTL_SEC) * 1000;
 
   // Fetch pages and find one with an Instagram Business Account
   const pages = await fetchPagesAndInstagramAccounts(
