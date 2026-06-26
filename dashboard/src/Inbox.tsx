@@ -60,11 +60,31 @@ interface IgMessage {
   timestamp: string;
 }
 
+interface EmailImage {
+  id: string;
+  messageId: string;
+  mimeType: string;
+  filename: string;
+  attachmentId?: string;
+  dataUrl?: string;
+  label?: string;
+}
+
 interface EmailMessage {
   fromUs: boolean;
   fromName: string;
   text: string;
   date: string;
+  images?: EmailImage[];
+}
+
+// Build the <img> src for an email image: inline data URL, or the attachment
+// endpoint (mime passed through for the response Content-Type).
+function emailImageSrc(img: EmailImage): string {
+  if (img.dataUrl) return img.dataUrl;
+  return `/api/email/attachments/${encodeURIComponent(img.messageId)}/${encodeURIComponent(
+    img.attachmentId || ""
+  )}?mime=${encodeURIComponent(img.mimeType)}`;
 }
 
 interface IgSummary {
@@ -181,6 +201,11 @@ export function Inbox() {
   const [drafting, setDrafting] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [busyPending, setBusyPending] = useState<string | null>(null);
+
+  // Inline image labelling: which image (by `${messageId}:${id}`) is being
+  // edited, and its draft text. Labels are sent to the AI on Auto Draft.
+  const [labelEditing, setLabelEditing] = useState<string | null>(null);
+  const [labelDraft, setLabelDraft] = useState("");
 
   const endRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -584,6 +609,31 @@ export function Inbox() {
     setSelected(null);
   }
 
+  // Save (or clear) an agent's description for one email image, optimistically.
+  async function saveImageLabel(img: EmailImage, label: string) {
+    if (!selected || selected.channel !== "email") return;
+    const threadId = selected.id;
+    const trimmed = label.trim();
+    setLabelEditing(null);
+    setEmailMessages((prev) =>
+      prev.map((m) => ({
+        ...m,
+        images: m.images?.map((g) =>
+          g.messageId === img.messageId && g.id === img.id ? { ...g, label: trimmed } : g
+        ),
+      }))
+    );
+    try {
+      await fetch(`/api/email/threads/${encodeURIComponent(threadId)}/image-label`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: img.messageId, imageId: img.id, label: trimmed }),
+      });
+    } catch {
+      toast("Failed to save label");
+    }
+  }
+
   // ── Pending approvals ────────────────────────────────────────────────────
   async function pendingAction(id: string, action: "approve" | "reject" | "dismiss") {
     if (busyPending) return;
@@ -939,7 +989,49 @@ export function Inbox() {
                       }}
                     >
                       <div style={styles.emailFrom}>{m.fromUs ? "You" : m.fromName}</div>
-                      <div style={styles.bubbleText}>{m.text}</div>
+                      {m.text && <div style={styles.bubbleText}>{m.text}</div>}
+                      {m.images && m.images.length > 0 && (
+                        <div style={styles.emailImages}>
+                          {m.images.map((img, ii) => {
+                            const key = `${img.messageId}:${img.id}`;
+                            const editing = labelEditing === key;
+                            return (
+                              <div key={ii} style={styles.emailImageWrap}>
+                                <a href={emailImageSrc(img)} target="_blank" rel="noreferrer" title={img.filename}>
+                                  <img src={emailImageSrc(img)} alt={img.filename} style={styles.emailImage} />
+                                </a>
+                                {/* Labels only on customer images — that's what the AI considers. */}
+                                {!m.fromUs &&
+                                  (editing ? (
+                                    <input
+                                      autoFocus
+                                      value={labelDraft}
+                                      placeholder="Describe this image…"
+                                      onChange={(e) => setLabelDraft(e.target.value)}
+                                      onBlur={() => saveImageLabel(img, labelDraft)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") saveImageLabel(img, labelDraft);
+                                        if (e.key === "Escape") setLabelEditing(null);
+                                      }}
+                                      style={styles.imgLabelInput}
+                                    />
+                                  ) : (
+                                    <button
+                                      onClick={() => {
+                                        setLabelEditing(key);
+                                        setLabelDraft(img.label || "");
+                                      }}
+                                      style={img.label ? styles.imgLabelText : styles.imgLabelAdd}
+                                      title="Describe this image for the AI"
+                                    >
+                                      {img.label ? `🏷 ${img.label}` : "+ Label"}
+                                    </button>
+                                  ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                       <div style={styles.bubbleTime}>{relTime(ts(m.date))}</div>
                     </div>
                   </div>
@@ -1188,6 +1280,27 @@ const styles: Record<string, React.CSSProperties> = {
   bubbleUs: { background: "#2563eb", color: "#fff" },
   bubbleText: { whiteSpace: "pre-wrap" },
   emailFrom: { fontSize: "0.68rem", fontWeight: 700, opacity: 0.65, marginBottom: "0.2rem" },
+  emailImages: { display: "flex", flexWrap: "wrap", gap: "0.6rem", marginTop: "0.4rem" },
+  emailImageWrap: { display: "flex", flexDirection: "column", gap: "0.25rem", maxWidth: "160px" },
+  emailImage: {
+    maxWidth: "160px", maxHeight: "160px", borderRadius: "8px",
+    border: "1px solid rgba(127,127,127,0.3)", objectFit: "cover", display: "block", cursor: "zoom-in",
+  },
+  imgLabelAdd: {
+    background: "none", border: "1px dashed rgba(127,127,127,0.5)", borderRadius: "6px",
+    color: "var(--text-faint)", fontSize: "0.68rem", fontWeight: 600, padding: "0.2rem 0.4rem",
+    cursor: "pointer", fontFamily: "inherit", textAlign: "center",
+  },
+  imgLabelText: {
+    background: "rgba(127,127,127,0.12)", border: "none", borderRadius: "6px",
+    color: "var(--text)", fontSize: "0.68rem", fontWeight: 600, padding: "0.2rem 0.4rem",
+    cursor: "pointer", fontFamily: "inherit", textAlign: "left", wordBreak: "break-word",
+  },
+  imgLabelInput: {
+    width: "160px", boxSizing: "border-box", padding: "0.25rem 0.4rem",
+    border: "1px solid var(--border-strong)", borderRadius: "6px",
+    background: "var(--surface)", color: "var(--text)", fontSize: "0.7rem", outline: "none",
+  },
   translation: { fontSize: "0.78rem", fontStyle: "italic", opacity: 0.7, marginTop: "3px", paddingTop: "3px", borderTop: "1px solid rgba(127,127,127,0.25)" },
   bubbleTime: { fontSize: "0.62rem", opacity: 0.6, marginTop: "3px", textAlign: "right" },
   failedRow: { display: "flex", alignItems: "center", gap: "0.4rem", marginTop: "0.35rem" },

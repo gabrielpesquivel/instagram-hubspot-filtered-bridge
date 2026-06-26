@@ -13,11 +13,22 @@ export interface EmailThreadSummary {
   snippet: string;
 }
 
+export interface EmailImage {
+  id: string;              // stable per-message id (attachmentId or inline-N) — label key
+  messageId: string;       // Gmail message id the attachment belongs to
+  mimeType: string;        // image/png, image/jpeg, …
+  filename: string;
+  attachmentId?: string;   // fetch via getAttachment (large/normal attachments)
+  dataUrl?: string;        // inline base64 (tiny embedded images)
+  label?: string;          // agent-supplied description, fed to the AI on draft
+}
+
 export interface EmailMessage {
   from: string;
   fromUs: boolean;
   text: string;
   date: string;
+  images: EmailImage[];
 }
 
 export interface EmailThreadDetail {
@@ -32,8 +43,9 @@ export interface EmailThreadDetail {
 
 interface GmailPayloadPart {
   mimeType?: string;
+  filename?: string;
   headers?: { name: string; value: string }[];
-  body?: { data?: string };
+  body?: { data?: string; attachmentId?: string; size?: number };
   parts?: GmailPayloadPart[];
 }
 interface GmailMessage {
@@ -90,15 +102,44 @@ function stripHtml(html: string): string {
     .replace(/&#39;/g, "'");
 }
 
-// Drop quoted history so the AI only sees the new message text.
+// Quoted history always sits at the bottom of an email, so truncating the HTML
+// at the first quote/forward container drops the whole reply chain (and any
+// nested quotes) without fragile end-tag matching.
+function cutHtmlAtQuote(html: string): string {
+  const markers = [
+    /<blockquote/i,
+    /<div[^>]+class="?gmail_quote/i,           // Gmail
+    /<div[^>]+id="?(?:divRplyFwdMsg|appendonsend)/i, // Outlook reply/forward
+    /<hr[^>]+id="?stopSpelling/i,              // Outlook separator
+  ];
+  let cut = html.length;
+  for (const re of markers) {
+    const m = html.match(re);
+    if (m && m.index !== undefined && m.index < cut) cut = m.index;
+  }
+  return html.slice(0, cut);
+}
+
+// Drop quoted history AND signature blocks so the thread view and the AI only
+// see the actual new message. Cuts at the first line that begins the reply
+// chain, the standard "-- " signature delimiter, or a mobile/footer trailer.
 function stripQuoted(text: string): string {
   const lines = text.split("\n");
   const out: string[] = [];
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const next3 = lines.slice(i + 1, i + 4).join("\n");
+    // Quoted reply chain.
     if (/^\s*>/.test(line)) break;
-    if (/^\s*On .+wrote:\s*$/.test(line)) break;
-    if (/^-{2,}\s*Original Message\s*-{2,}/i.test(line)) break;
-    if (/^_{5,}$/.test(line)) break;
+    if (/^\s*On\b.*\bwrote:\s*$/.test(line)) break;             // Gmail one-line attribution
+    if (/^\s*On\b.+@.+$/.test(line) && /wrote:\s*$/.test(lines[i + 1] || "")) break; // wrapped attribution
+    if (/^\s*-{2,}\s*Original Message\s*-{2,}/i.test(line)) break;
+    if (/^\s*_{5,}\s*$/.test(line)) break;
+    if (/^\s*From:\s.+$/.test(line) && /^\s*(Sent|To|Subject|Date):/m.test(next3)) break; // Outlook header block
+    // Signatures & footers.
+    if (/^--\s*$/.test(line)) break;                            // RFC 3676 signature delimiter
+    if (/^\s*Sent from my \w+/i.test(line)) break;
+    if (/^\s*Get Outlook for /i.test(line)) break;
     out.push(line);
   }
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
@@ -109,8 +150,28 @@ function extractBody(payload: GmailPayloadPart | undefined, snippet: string): st
   const plain = parts.find((p) => p.mimeType === "text/plain" && p.body?.data);
   if (plain?.body?.data) return stripQuoted(decodeB64Url(plain.body.data));
   const html = parts.find((p) => p.mimeType === "text/html" && p.body?.data);
-  if (html?.body?.data) return stripQuoted(stripHtml(decodeB64Url(html.body.data)));
+  if (html?.body?.data) return stripQuoted(stripHtml(cutHtmlAtQuote(decodeB64Url(html.body.data))));
   return snippet;
+}
+
+// Collect image attachments (and tiny inline images) on a message so the thread
+// view can show photos customers send. Normal attachments expose an
+// attachmentId fetched lazily; small embedded ones carry their bytes inline.
+function collectImages(payload: GmailPayloadPart | undefined, messageId: string): EmailImage[] {
+  const out: EmailImage[] = [];
+  let n = 0;
+  for (const p of flatten(payload)) {
+    if (!p.mimeType?.startsWith("image/")) continue;
+    n++;
+    const filename = p.filename || `image-${n}`;
+    if (p.body?.attachmentId) {
+      out.push({ id: p.body.attachmentId, messageId, mimeType: p.mimeType, filename, attachmentId: p.body.attachmentId });
+    } else if (p.body?.data) {
+      const b64 = p.body.data.replace(/-/g, "+").replace(/_/g, "/");
+      out.push({ id: `inline-${n}`, messageId, mimeType: p.mimeType, filename, dataUrl: `data:${p.mimeType};base64,${b64}` });
+    }
+  }
+  return out;
 }
 
 // "Jane Doe <jane@x.com>" -> "Jane Doe"; bare address -> the address
@@ -180,6 +241,7 @@ export async function getThreadDetail(
       fromUs: emailAddress(from) === us,
       text: extractBody(m.payload, m.snippet || ""),
       date: getHeader(m.payload, "Date"),
+      images: collectImages(m.payload, m.id),
     };
   });
 
@@ -273,6 +335,27 @@ export async function sendThreadReply(token: string, args: SendReplyArgs): Promi
   if (!res.ok) return null;
   const data = (await res.json()) as { id?: string };
   return data.id || null;
+}
+
+/** Fetch one attachment's raw bytes, or null if it can't be read. */
+export async function getAttachment(
+  token: string,
+  messageId: string,
+  attachmentId: string
+): Promise<Uint8Array | null> {
+  const data = await gmailGet<{ data?: string }>(
+    `/messages/${messageId}/attachments/${attachmentId}`,
+    token
+  );
+  if (!data?.data) return null;
+  try {
+    const bin = atob(data.data.replace(/-/g, "+").replace(/_/g, "/"));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  } catch {
+    return null;
+  }
 }
 
 /** Mark a thread read (remove the UNREAD label). Best-effort. */

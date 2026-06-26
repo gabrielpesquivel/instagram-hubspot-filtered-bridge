@@ -18,6 +18,7 @@ import {
   sendThreadReply,
   markThreadRead,
   getSendAsSignature,
+  getAttachment,
 } from "../services/gmail-api";
 
 /** Initiate Google OAuth — validate session, then redirect to Google consent. */
@@ -123,12 +124,28 @@ export async function handleSuggestEmailReply(
     const detail = await getThreadDetail(token, threadId, conn.email);
     if (!detail) return jsonResponse({ error: "Thread not found" }, 404);
 
+    const labels = await getImageLabels(env, threadId);
+
     // Map the thread to the conversation shape generateReply expects: the
     // customer is "user", we are "agent". Subject rides on the first message.
     const messages: ConversationMessage[] = [];
     let first = true;
     for (const m of detail.messages) {
-      const text = first ? `Subject: ${detail.subject}\n\n${m.text}` : m.text;
+      // Note attached photos so the AI acknowledges them (it can't see them) and
+      // doesn't reply as if a photo-only message were blank. Prefer the agent's
+      // own description of each image when one has been added.
+      const imgNote = m.images.length
+        ? m.images
+            .map((img, i) => {
+              const label = labels[`${img.messageId}:${img.id}`];
+              return label
+                ? `[Customer attached an image — described by our team as: ${label}]`
+                : `[Customer attached an image${m.images.length > 1 ? ` (${i + 1} of ${m.images.length})` : ""}]`;
+            })
+            .join("\n")
+        : "";
+      const bodyText = [m.text, imgNote].filter(Boolean).join("\n\n");
+      const text = first ? `Subject: ${detail.subject}\n\n${bodyText}` : bodyText;
       first = false;
       if (!text.trim()) continue;
       messages.push({
@@ -198,6 +215,37 @@ function textToHtml(text: string): string {
     .replace(/\n/g, "<br>");
 }
 
+// Agent-supplied image descriptions, stored per thread as a single map
+// (`${messageId}:${imageId}` -> label) so a thread load is one KV read.
+const imgLabelsKey = (threadId: string) => `email_img_labels:${threadId}`;
+
+async function getImageLabels(env: Env, threadId: string): Promise<Record<string, string>> {
+  return ((await env.PROFILE_CACHE.get(imgLabelsKey(threadId), "json")) as Record<string, string>) || {};
+}
+
+/** Save (or clear) the agent's description for one image in a thread. */
+export async function handleSetImageLabel(
+  request: Request,
+  env: Env,
+  threadId: string
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) return jsonResponse({ error: "Unauthorized" }, 401);
+  const body = (await request.json().catch(() => ({}))) as {
+    messageId?: string;
+    imageId?: string;
+    label?: string;
+  };
+  if (!body.messageId || !body.imageId) return jsonResponse({ error: "Missing image reference" }, 400);
+
+  const labels = await getImageLabels(env, threadId);
+  const key = `${body.messageId}:${body.imageId}`;
+  const label = (body.label || "").trim();
+  if (label) labels[key] = label;
+  else delete labels[key];
+  await env.PROFILE_CACHE.put(imgLabelsKey(threadId), JSON.stringify(labels));
+  return jsonResponse({ ok: true });
+}
+
 /** Full thread for the unified inbox thread view: messages + reply subject. */
 export async function handleGetEmailThread(
   request: Request,
@@ -212,6 +260,7 @@ export async function handleGetEmailThread(
   try {
     const detail = await getThreadDetail(token, threadId, conn.email);
     if (!detail) return jsonResponse({ error: "Thread not found" }, 404);
+    const labels = await getImageLabels(env, threadId);
     return jsonResponse({
       threadId,
       subject: detail.subject,
@@ -221,6 +270,7 @@ export async function handleGetEmailThread(
         fromName: firstNameFrom(m.from),
         text: m.text,
         date: m.date,
+        images: m.images.map((img) => ({ ...img, label: labels[`${img.messageId}:${img.id}`] || "" })),
       })),
     });
   } catch (error) {
@@ -243,6 +293,32 @@ export async function handleMarkEmailDone(
   const ok = await markThreadRead(token, threadId).catch(() => false);
   if (!ok) return jsonResponse({ error: "Failed to mark read" }, 502);
   return jsonResponse({ ok: true });
+}
+
+/** Stream an email image attachment so the thread view can render it inline.
+ *  `mime` is passed by the client (from the thread detail) for the response
+ *  Content-Type; only image/* is allowed. */
+export async function handleGetEmailAttachment(
+  request: Request,
+  env: Env,
+  messageId: string,
+  attachmentId: string
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) return jsonResponse({ error: "Unauthorized" }, 401);
+  const token = await getValidGoogleToken(env);
+  if (!token) return jsonResponse({ error: "Gmail not connected" }, 409);
+
+  const bytes = await getAttachment(token, messageId, attachmentId);
+  if (!bytes) return jsonResponse({ error: "Attachment not found" }, 404);
+
+  const reqMime = new URL(request.url).searchParams.get("mime") || "";
+  const contentType = /^image\/[a-z0-9.+-]+$/i.test(reqMime) ? reqMime : "application/octet-stream";
+  return new Response(bytes, {
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": "private, max-age=3600",
+    },
+  });
 }
 
 /** Send an agent's reply into a Gmail thread, then mark the thread read. */

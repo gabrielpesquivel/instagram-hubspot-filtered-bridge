@@ -76,6 +76,8 @@ import {
   handleGetEmailSignature,
   handleSetEmailSignature,
   handleMarkEmailDone,
+  handleGetEmailAttachment,
+  handleSetImageLabel,
 } from "./handlers/email";
 
 export default {
@@ -250,6 +252,19 @@ export default {
     const emailDoneMatch = path.match(/^\/api\/email\/threads\/([^/]+)\/done$/);
     if (emailDoneMatch && request.method === "POST") {
       return handleMarkEmailDone(request, env, decodeURIComponent(emailDoneMatch[1]));
+    }
+    const emailImgLabelMatch = path.match(/^\/api\/email\/threads\/([^/]+)\/image-label$/);
+    if (emailImgLabelMatch && request.method === "POST") {
+      return handleSetImageLabel(request, env, decodeURIComponent(emailImgLabelMatch[1]));
+    }
+    const emailAttachMatch = path.match(/^\/api\/email\/attachments\/([^/]+)\/([^/]+)$/);
+    if (emailAttachMatch && request.method === "GET") {
+      return handleGetEmailAttachment(
+        request,
+        env,
+        decodeURIComponent(emailAttachMatch[1]),
+        decodeURIComponent(emailAttachMatch[2])
+      );
     }
     const emailThreadMatch = path.match(/^\/api\/email\/threads\/([^/]+)$/);
     if (emailThreadMatch && request.method === "GET") {
