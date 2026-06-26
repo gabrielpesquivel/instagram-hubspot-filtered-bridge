@@ -218,7 +218,9 @@ export function Inbox() {
       const res = await fetch("/api/instagram/unread");
       if (res.ok) {
         const data = await res.json();
-        setIgUnread(data.threads || []);
+        // `stale` = the Graph pull transiently failed; keep the current list
+        // rather than blanking it (caused threads to disappear then reappear).
+        if (!data.stale) setIgUnread(data.threads || []);
       }
     } catch { /* ignore — IG may be disconnected */ }
   }, []);
@@ -426,9 +428,14 @@ export function Inbox() {
     if (!selected || drafting) return;
     setDrafting(true);
     try {
+      // IG has two suggest paths: stored conversations key off senderId; live
+      // "pull" threads (no stored conversation yet) draft from the Graph thread
+      // history via its conversationId.
       const url =
         selected.channel === "instagram"
-          ? `/api/conversations/${encodeURIComponent(selected.id)}/suggest`
+          ? selected.source === "pull"
+            ? `/api/instagram/threads/${encodeURIComponent(selected.conversationId || "")}/suggest`
+            : `/api/conversations/${encodeURIComponent(selected.id)}/suggest`
           : `/api/email/threads/${encodeURIComponent(selected.id)}/suggest`;
       const res = await fetch(url, { method: "POST" });
       const data = await res.json();
@@ -568,9 +575,11 @@ export function Inbox() {
       setIgUnread((p) => p.filter((u) => u.senderId !== senderId));
       setIgConvos((p) => p.filter((c) => c.senderId !== senderId));
     } else {
-      // Email: mark read removes it from the unread queue (handled server-side on send);
-      // here we just drop it locally and deselect.
-      setEmailThreads((p) => p.filter((t) => t.threadId !== selected.id));
+      // Email: mark the Gmail thread read so it leaves the unread queue for good
+      // (without this it dropped locally but came back on the next poll/refresh).
+      const threadId = selected.id;
+      fetch(`/api/email/threads/${encodeURIComponent(threadId)}/done`, { method: "POST" }).catch(() => {});
+      setEmailThreads((p) => p.filter((t) => t.threadId !== threadId));
     }
     setSelected(null);
   }
@@ -662,9 +671,6 @@ export function Inbox() {
   const emailCount = recent.filter((i) => i.channel === "email").length;
 
   const composerDisabled = windowExpired && selected?.channel === "instagram";
-  // Pulled IG threads have no stored conversation yet, so the AI-suggest endpoint
-  // has no history to work from until the agent replies once.
-  const aiDraftUnavailable = selected?.channel === "instagram" && selected?.source === "pull";
 
   return (
     <div style={styles.root}>
@@ -971,9 +977,8 @@ export function Inbox() {
               <div style={styles.composerBtns}>
                 <button
                   onClick={handleAiDraft}
-                  disabled={drafting || composerDisabled || aiDraftUnavailable}
+                  disabled={drafting || composerDisabled}
                   style={styles.aiDraftBtn}
-                  title={aiDraftUnavailable ? "Reply once to enable Auto Draft for this DM" : undefined}
                 >
                   {drafting ? "Drafting…" : "Auto Draft"}
                 </button>

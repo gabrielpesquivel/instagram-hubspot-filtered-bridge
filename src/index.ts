@@ -60,6 +60,7 @@ import {
   handleListInstagramUnread,
   handleGetInstagramThread,
   handleMarkInstagramDone,
+  handleSuggestInstagramThreadReply,
 } from "./handlers/instagram-inbox";
 import { handleGetCorrections, handleCorrectionAction } from "./handlers/ai";
 import { handleShopifyOrderLookup, handleShopifyOrdersByEmail } from "./handlers/shopify";
@@ -74,6 +75,7 @@ import {
   handleGetEmailThread,
   handleGetEmailSignature,
   handleSetEmailSignature,
+  handleMarkEmailDone,
 } from "./handlers/email";
 
 export default {
@@ -245,6 +247,10 @@ export default {
     if (emailReplyMatch && request.method === "POST") {
       return handleSendEmailReply(request, env, decodeURIComponent(emailReplyMatch[1]));
     }
+    const emailDoneMatch = path.match(/^\/api\/email\/threads\/([^/]+)\/done$/);
+    if (emailDoneMatch && request.method === "POST") {
+      return handleMarkEmailDone(request, env, decodeURIComponent(emailDoneMatch[1]));
+    }
     const emailThreadMatch = path.match(/^\/api\/email\/threads\/([^/]+)$/);
     if (emailThreadMatch && request.method === "GET") {
       return handleGetEmailThread(request, env, decodeURIComponent(emailThreadMatch[1]));
@@ -272,6 +278,10 @@ export default {
     }
     if (path === "/api/instagram/done" && request.method === "POST") {
       return handleMarkInstagramDone(request, env);
+    }
+    const igThreadSuggestMatch = path.match(/^\/api\/instagram\/threads\/([^/]+)\/suggest$/);
+    if (igThreadSuggestMatch && request.method === "POST") {
+      return handleSuggestInstagramThreadReply(request, env, decodeURIComponent(igThreadSuggestMatch[1]));
     }
     const igThreadMatch = path.match(/^\/api\/instagram\/threads\/([^/]+)$/);
     if (igThreadMatch && request.method === "GET") {

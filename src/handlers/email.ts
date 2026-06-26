@@ -229,6 +229,22 @@ export async function handleGetEmailThread(
   }
 }
 
+/** Mark a Gmail thread read without replying — the "Done" action. Clears the
+ *  UNREAD label so it drops out of the queue and stays gone after a refresh
+ *  (previously it was only hidden client-side and came back on the next poll). */
+export async function handleMarkEmailDone(
+  request: Request,
+  env: Env,
+  threadId: string
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) return jsonResponse({ error: "Unauthorized" }, 401);
+  const token = await getValidGoogleToken(env);
+  if (!token) return jsonResponse({ error: "Gmail not connected" }, 409);
+  const ok = await markThreadRead(token, threadId).catch(() => false);
+  if (!ok) return jsonResponse({ error: "Failed to mark read" }, 502);
+  return jsonResponse({ ok: true });
+}
+
 /** Send an agent's reply into a Gmail thread, then mark the thread read. */
 export async function handleSendEmailReply(
   request: Request,

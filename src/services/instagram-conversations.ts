@@ -62,8 +62,10 @@ function isUs(p: GraphParticipant | undefined, self: { id: string; username: str
 }
 
 /** List Instagram conversations (newest first) with their last-message snippet
- *  and unread flag. Returns [] on any failure (fail-soft, like the email list). */
-export async function listInstagramConversations(env: Env): Promise<IgConversationSummary[]> {
+ *  and unread flag. Returns `null` on a transient Graph failure (rate limit,
+ *  5xx, network) so callers can keep the previous list instead of flashing it
+ *  empty; returns `[]` only when the account genuinely has no conversations. */
+export async function listInstagramConversations(env: Env): Promise<IgConversationSummary[] | null> {
   const conn = await getConnection(env);
   if (!conn) return [];
   const token = await getPageAccessToken(env);
@@ -82,7 +84,7 @@ export async function listInstagramConversations(env: Env): Promise<IgConversati
     const res = await fetch(url);
     if (!res.ok) {
       await cerr(env, `IG conversations fetch failed: HTTP ${res.status}`, await res.text());
-      return [];
+      return null;
     }
     const data = (await res.json()) as { data?: GraphConversation[] };
     const out: IgConversationSummary[] = [];
@@ -103,7 +105,7 @@ export async function listInstagramConversations(env: Env): Promise<IgConversati
     return out;
   } catch (error) {
     await cerr(env, "IG conversations fetch error:", error);
-    return [];
+    return null;
   }
 }
 
