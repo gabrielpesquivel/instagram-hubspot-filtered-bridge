@@ -160,7 +160,11 @@ export async function handleSuggestEmailReply(
     }
 
     const firstCustomer = detail.messages.find((m) => !m.fromUs);
-    const customerName = firstNameFrom(firstCustomer?.from || "");
+    // Website contact-form emails arrive From the store ("BootInk"), with the
+    // real customer name in a "Name:" line in the body. Prefer that; fall back
+    // to the From header for normal emails.
+    const customerName =
+      formNameFrom(firstCustomer?.text || "") || firstNameFrom(firstCustomer?.from || "");
 
     const emailInstruction = `This message is a customer-support EMAIL, not an Instagram DM. For this reply ONLY, override the brevity and pure-greeting rules above. Format the response EXACTLY like this, including the blank lines:
 
@@ -170,7 +174,9 @@ Hi, ${customerName}.
 
 Kind regards,
 
-Still reply in the customer's language. Do not add a name or signature after "Kind regards,". Do not include a subject line or any text outside this format.`;
+Still reply in the customer's language. Do not add a name or signature after "Kind regards,". Do not include a subject line or any text outside this format.
+
+WEBSITE REFERENCE (email only): When pointing the customer to our website, say "our website at bootink.com". Do NOT say "in our bio" or "found in our bio" — that phrasing is for Instagram DMs, not email.`;
 
     // Give the AI the customer's email so it can pull their live Shopify orders
     // (Feature 3) instead of deflecting order questions to info@bootink.com.
@@ -391,6 +397,15 @@ function emailFromHeader(from: string): string {
   const m = from.match(/<([^>]+)>/);
   const addr = (m ? m[1] : from).trim().toLowerCase();
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr) ? addr : "";
+}
+
+// Pull the first name from a contact-form body's "Name:" line. Returns "" when
+// there is no such line so the caller can fall back to the From header.
+function formNameFrom(body: string): string {
+  const m = body.match(/^\s*Name:\s*(.+)$/im);
+  const name = (m ? m[1] : "").trim();
+  if (!name || name.includes("@")) return "";
+  return name.split(/\s+/)[0];
 }
 
 // "Jane Doe <jane@x.com>" -> "Jane"; falls back to "there" for bare/blank addresses.
