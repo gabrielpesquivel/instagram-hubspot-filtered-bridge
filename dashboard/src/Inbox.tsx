@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "./toast";
 import { showAmendment } from "./amendment";
+import { showActions } from "./action";
 
 // ── Unified data model ──────────────────────────────────────────────────────
 // Both channels collapse to a single InboxItem for the list; the thread view
@@ -470,6 +471,7 @@ export function Inbox() {
         // Render green when the AI cited live order data (⟦…⟧), else plain.
         setEditorContent(raw, raw.includes("⟦"));
         setAiSuggestion(stripGreenMarkers(raw));
+        if (data.actions?.length) showActions(data.actions);
       } else {
         toast(data.error || "Auto Draft failed");
       }

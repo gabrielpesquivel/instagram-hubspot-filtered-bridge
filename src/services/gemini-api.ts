@@ -289,6 +289,105 @@ const SHOPIFY_TOOLS = [
   },
 ];
 
+// ── Order actions (DETECTION ONLY for now) ───────────────────────────────────
+// These tools let the model signal that the customer is asking us to *change*
+// an order. We do NOT touch Shopify yet — we capture the intent, surface a
+// Yes/No confirmation to the agent, and (later) wire the writes to Shopify.
+const ACTION_TOOLS = [
+  {
+    functionDeclarations: [
+      {
+        name: "update_address",
+        description:
+          "The customer wants to change the SHIPPING ADDRESS on an existing order. Provide the order number and the full new address as given.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            order_number: { type: "STRING", description: "Order number, with or without '#'. Leave blank if not yet known." },
+            new_address: { type: "STRING", description: "The full new shipping address as the customer stated it." },
+          },
+          required: ["new_address"],
+        },
+      },
+      {
+        name: "update_email",
+        description:
+          "The customer wants to change the EMAIL ADDRESS on an existing order. Provide the order number and the new email.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            order_number: { type: "STRING", description: "Order number, with or without '#'. Leave blank if not yet known." },
+            new_email: { type: "STRING", description: "The new email address." },
+          },
+          required: ["new_email"],
+        },
+      },
+      {
+        name: "duplicate_order",
+        description:
+          "The customer wants us to DUPLICATE or RESEND an existing order (e.g. lost in transit, wants the same order again). Provide the order number.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            order_number: { type: "STRING", description: "Order number, with or without '#'. Leave blank if not yet known." },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "add_to_order",
+        description:
+          "The customer wants to ADD one or more items to an existing (usually not-yet-shipped) order. Provide the order number and what they want to add.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            order_number: { type: "STRING", description: "Order number, with or without '#'. Leave blank if not yet known." },
+            items: { type: "STRING", description: "What the customer wants to add (e.g. '2x Italy flag transfer')." },
+          },
+          required: ["items"],
+        },
+      },
+    ],
+  },
+];
+
+const ACTION_NAMES = new Set(["update_address", "update_email", "duplicate_order", "add_to_order"]);
+
+export interface ActionProposal {
+  id: string;
+  type: string;
+  orderNumber?: string;
+  summary: string; // human label, e.g. "Update #18032 address"
+  args: Record<string, unknown>;
+}
+
+// Build the human-facing label + structured proposal from a detected action call.
+function buildActionProposal(name: string, args: Record<string, unknown>): ActionProposal {
+  const raw = String(args.order_number ?? "").trim().replace(/^#/, "");
+  const order = raw ? `#${raw}` : "";
+  const tail = order || "order (number TBC)";
+  const summary =
+    name === "update_address"
+      ? `Update ${tail} address`
+      : name === "update_email"
+      ? `Update ${tail} email`
+      : name === "duplicate_order"
+      ? `Duplicate/resend ${tail}`
+      : name === "add_to_order"
+      ? `Add items to ${tail}`
+      : `${name} ${tail}`;
+  return { id: crypto.randomUUID(), type: name, orderNumber: order || undefined, summary, args };
+}
+
+function actionInstruction(): string {
+  return `ORDER ACTIONS — The customer may ask us to change an existing order. When they CLEARLY request one of these for a specific order, CALL the matching tool with the order number and new details:
+- update_address — change the shipping address
+- update_email — change the email on the order
+- duplicate_order — duplicate or resend the order
+- add_to_order — add item(s) to the order
+A team member carries these out after confirming, so in your reply tell the customer you'll get it sorted / pass it on — do NOT claim it is already done. If the order number is unclear, still call the tool (leave order_number blank) and ask them for it in your reply. Do not call an action tool for general questions, quotes, or status checks.`;
+}
+
 // Execute a tool call and return a plain object for the functionResponse.
 async function runShopifyTool(
   env: Env,
@@ -331,11 +430,13 @@ export async function generateReply(
   messages: ConversationMessage[],
   env: Env,
   extraInstruction?: string,
-  opts?: { shopify?: { customerEmail?: string } }
+  opts?: { shopify?: { customerEmail?: string }; collectActions?: ActionProposal[] }
 ): Promise<string> {
   const settings = await getGeminiSettings(env);
   const learnedBlock = buildLearnedGuidelinesBlock(await getLearnedGuidelines(env));
   const useShopify = !!opts?.shopify && shopifyConfigured(env);
+  const collectActions = opts?.collectActions;
+  const actionsEnabled = !!collectActions;
 
   // Limit context to prevent overflow — keep most recent messages
   const recentMessages = messages.length > MAX_CONTEXT_MESSAGES
@@ -378,9 +479,18 @@ export async function generateReply(
     learnedBlock,
     extraInstruction,
     useShopify ? shopifyInstruction(opts?.shopify?.customerEmail) : "",
+    actionsEnabled ? actionInstruction() : "",
   ]
     .filter(Boolean)
     .join("\n\n");
+
+  // Merge the enabled tool declarations into the single tools array Gemini wants.
+  const functionDeclarations = [
+    ...(useShopify ? SHOPIFY_TOOLS[0].functionDeclarations : []),
+    ...(actionsEnabled ? ACTION_TOOLS[0].functionDeclarations : []),
+  ];
+  const tools = functionDeclarations.length ? [{ functionDeclarations }] : undefined;
+  const toolsEnabled = !!tools;
 
   // Function-calling loop: the model may ask to look up an order, we run it and
   // feed the result back, then it produces the final reply. Cap the rounds so a
@@ -396,7 +506,7 @@ export async function generateReply(
       body: JSON.stringify({
         system_instruction: { parts: [{ text: systemText }] },
         contents,
-        ...(useShopify ? { tools: SHOPIFY_TOOLS } : {}),
+        ...(tools ? { tools } : {}),
         generationConfig: { maxOutputTokens: 2048, temperature: 0.3 },
       }),
     });
@@ -416,13 +526,29 @@ export async function generateReply(
     const parts = content?.parts || [];
     const calls = parts.filter((p): p is Required<Pick<GeminiPart, "functionCall">> => !!p.functionCall);
 
-    // The model wants order data — run each call, append the results, loop.
-    if (useShopify && calls.length > 0 && round < MAX_TOOL_ROUNDS) {
+    // The model wants a tool — run lookups for real; for actions, record the
+    // intent (NOT executed yet) and acknowledge so it finishes the reply.
+    if (toolsEnabled && calls.length > 0 && round < MAX_TOOL_ROUNDS) {
       contents.push({ role: "model", parts });
       const responseParts: GeminiPart[] = [];
       for (const c of calls) {
-        const result = await runShopifyTool(env, c.functionCall.name, c.functionCall.args || {});
-        responseParts.push({ functionResponse: { name: c.functionCall.name, response: result } });
+        const name = c.functionCall.name;
+        const fnArgs = c.functionCall.args || {};
+        if (collectActions && ACTION_NAMES.has(name)) {
+          collectActions.push(buildActionProposal(name, fnArgs));
+          responseParts.push({
+            functionResponse: {
+              name,
+              response: {
+                proposed: true,
+                note: "Noted — a team member will action this after confirming. Tell the customer you'll get it sorted; do not claim it is already done.",
+              },
+            },
+          });
+        } else {
+          const result = await runShopifyTool(env, name, fnArgs);
+          responseParts.push({ functionResponse: { name, response: result } });
+        }
       }
       contents.push({ role: "user", parts: responseParts });
       continue;

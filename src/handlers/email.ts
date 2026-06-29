@@ -2,6 +2,7 @@ import type { Env, ConversationMessage } from "../types";
 import { isAuthenticated, jsonResponse } from "../utils/auth";
 import { cerr } from "../services/logger";
 import { generateReply, maybeProposeAmendment } from "../services/gemini-api";
+import type { ActionProposal } from "../services/gemini-api";
 import {
   generateGoogleAuthUrl,
   validateGoogleState,
@@ -181,10 +182,12 @@ WEBSITE REFERENCE (email only): When pointing the customer to our website, say "
     // Give the AI the customer's email so it can pull their live Shopify orders
     // (Feature 3) instead of deflecting order questions to info@bootink.com.
     const customerEmail = emailFromHeader(detail.replyTo || firstCustomer?.from || "");
+    const actions: ActionProposal[] = [];
     const suggestion = await generateReply(messages, env, emailInstruction, {
       shopify: { customerEmail },
+      collectActions: actions,
     });
-    return jsonResponse({ suggestion, subject: detail.subject });
+    return jsonResponse({ suggestion, subject: detail.subject, actions });
   } catch (error) {
     await cerr(env, "Suggest email reply error:", error);
     return jsonResponse({ error: "Failed to generate suggestion" }, 500);

@@ -4,6 +4,7 @@ import { SettingsDrawer } from "./SettingsDrawer";
 import { ThemeToggle } from "./ThemeToggle";
 import { Toaster } from "./toast";
 import { AmendmentPrompt } from "./AmendmentPrompt";
+import { ActionPrompt } from "./ActionPrompt";
 
 interface InboxPageProps {
   onBack: () => void;
@@ -41,6 +42,7 @@ export function InboxPage({ onBack, onLogout }: InboxPageProps) {
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <Toaster />
       <AmendmentPrompt />
+      <ActionPrompt />
     </div>
   );
 }

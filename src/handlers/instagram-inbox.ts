@@ -9,6 +9,7 @@ import { isBlocklisted } from "../services/blocklist";
 import { getFilterSettings } from "../services/filter";
 import { getUserProfile } from "../services/instagram-api";
 import { generateReply } from "../services/gemini-api";
+import type { ActionProposal } from "../services/gemini-api";
 import type { ConversationMessage } from "../types";
 
 // "Done" markers: senderId -> epoch ms when the agent cleared the thread. The
@@ -128,8 +129,9 @@ export async function handleSuggestInstagramThreadReply(
     if (!messages.some((m) => m.sender === "user")) {
       return jsonResponse({ error: "No customer message to reply to" }, 400);
     }
-    const suggestion = await generateReply(messages, env);
-    return jsonResponse({ suggestion });
+    const actions: ActionProposal[] = [];
+    const suggestion = await generateReply(messages, env, undefined, { collectActions: actions });
+    return jsonResponse({ suggestion, actions });
   } catch (error) {
     await cerr(env, "Suggest IG thread reply error:", error);
     return jsonResponse({ error: "Failed to generate suggestion" }, 500);

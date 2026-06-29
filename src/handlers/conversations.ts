@@ -18,6 +18,7 @@ import {
   saveGeminiSettings,
   maybeProposeAmendment,
 } from "../services/gemini-api";
+import type { ActionProposal } from "../services/gemini-api";
 import { incrementStat, appendLog } from "../services/stats";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -176,8 +177,9 @@ export async function handleSuggestConversationReply(
   }
 
   try {
-    const suggestion = await generateReply(conv.messages, env);
-    return jsonResponse({ suggestion });
+    const actions: ActionProposal[] = [];
+    const suggestion = await generateReply(conv.messages, env, undefined, { collectActions: actions });
+    return jsonResponse({ suggestion, actions });
   } catch (error) {
     return jsonResponse({
       error: `Generation failed: ${error instanceof Error ? error.message : String(error)}`,
