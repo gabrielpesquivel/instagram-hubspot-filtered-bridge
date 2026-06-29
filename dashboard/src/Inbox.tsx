@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "./toast";
+import { showAmendment } from "./amendment";
 
 // ── Unified data model ──────────────────────────────────────────────────────
 // Both channels collapse to a single InboxItem for the list; the thread view
@@ -513,6 +514,8 @@ export function Inbox() {
             toast(body.error || "Send failed");
           }
         } else {
+          const ok = await res.json().catch(() => ({}));
+          if (ok.amendment) showAmendment(ok.amendment);
           fetchIg();
         }
       } catch {
@@ -539,6 +542,7 @@ export function Inbox() {
           ]);
           // Sent threads drop out of the unread queue.
           setEmailThreads((p) => p.filter((t) => t.threadId !== selected.id));
+          if (body.amendment) showAmendment(body.amendment);
         } else {
           toast(body.error || "Email send failed");
         }

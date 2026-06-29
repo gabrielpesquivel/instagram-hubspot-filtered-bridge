@@ -62,7 +62,7 @@ import {
   handleMarkInstagramDone,
   handleSuggestInstagramThreadReply,
 } from "./handlers/instagram-inbox";
-import { handleGetCorrections, handleCorrectionAction } from "./handlers/ai";
+import { handleGetAmendments, handleAmendmentAction } from "./handlers/ai";
 import { handleShopifyOrderLookup, handleShopifyOrdersByEmail } from "./handlers/shopify";
 import {
   handleGoogleAuthInit,
@@ -279,12 +279,12 @@ export default {
       return handleShopifyOrdersByEmail(request, env);
     }
 
-    // AI learned-corrections review
-    if (path === "/api/ai/corrections" && request.method === "GET") {
-      return handleGetCorrections(request, env);
+    // AI guideline amendments (the self-improving loop)
+    if (path === "/api/ai/amendments" && request.method === "GET") {
+      return handleGetAmendments(request, env);
     }
-    if (path === "/api/ai/corrections/action" && request.method === "POST") {
-      return handleCorrectionAction(request, env);
+    if (path === "/api/ai/amendments/action" && request.method === "POST") {
+      return handleAmendmentAction(request, env);
     }
 
     // Instagram pull (live unread DMs, like the email list)

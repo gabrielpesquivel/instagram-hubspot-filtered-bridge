@@ -3,6 +3,7 @@ import { Inbox } from "./Inbox";
 import { SettingsDrawer } from "./SettingsDrawer";
 import { ThemeToggle } from "./ThemeToggle";
 import { Toaster } from "./toast";
+import { AmendmentPrompt } from "./AmendmentPrompt";
 
 interface InboxPageProps {
   onBack: () => void;
@@ -39,6 +40,7 @@ export function InboxPage({ onBack, onLogout }: InboxPageProps) {
 
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <Toaster />
+      <AmendmentPrompt />
     </div>
   );
 }

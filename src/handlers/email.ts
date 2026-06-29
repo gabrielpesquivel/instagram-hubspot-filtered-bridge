@@ -1,7 +1,7 @@
 import type { Env, ConversationMessage } from "../types";
 import { isAuthenticated, jsonResponse } from "../utils/auth";
 import { cerr } from "../services/logger";
-import { generateReply, recordCorrection } from "../services/gemini-api";
+import { generateReply, maybeProposeAmendment } from "../services/gemini-api";
 import {
   generateGoogleAuthUrl,
   validateGoogleState,
@@ -376,16 +376,22 @@ export async function handleSendEmailReply(
       return jsonResponse({ error: "Gmail rejected the message" }, 502);
     }
 
-    // Self-improving loop: learn from an edited Auto Draft (compare to raw text,
-    // not the signature-appended body).
+    // Self-improving loop: turn an edited Auto Draft into a proposed guideline
+    // rule (compare to raw text, not the signature-appended body).
+    let amendment = null;
     if (body.aiSuggestion) {
       const lastCustomer = [...detail.messages].reverse().find((m) => !m.fromUs);
-      await recordCorrection(env, lastCustomer?.text || detail.subject, body.aiSuggestion, text);
+      amendment = await maybeProposeAmendment(
+        env,
+        lastCustomer?.text || detail.subject,
+        body.aiSuggestion,
+        text
+      );
     }
 
     // Best-effort: clear the unread flag so it drops out of the queue.
     await markThreadRead(token, threadId).catch(() => {});
-    return jsonResponse({ ok: true, messageId });
+    return jsonResponse({ ok: true, messageId, amendment });
   } catch (error) {
     await cerr(env, "Send email reply error:", error);
     return jsonResponse({ error: "Failed to send reply" }, 500);

@@ -16,7 +16,7 @@ import {
   generateReply,
   getGeminiSettings,
   saveGeminiSettings,
-  recordCorrection,
+  maybeProposeAmendment,
 } from "../services/gemini-api";
 import { incrementStat, appendLog } from "../services/stats";
 
@@ -79,12 +79,6 @@ export async function handleReplyConversation(
 
   // Check if 24h window expired — use HUMAN_AGENT tag if so
   const conv0 = await getConversation(senderId, env);
-
-  // Self-improving loop: if this reply was an edited Auto Draft, learn the delta.
-  if (body.aiSuggestion && conv0) {
-    const lastCustomer = [...conv0.messages].reverse().find((m) => m.sender === "user");
-    await recordCorrection(env, lastCustomer?.text || "", body.aiSuggestion, text);
-  }
   const expired = conv0 ? isWindowExpired(conv0.messages) : false;
 
   // Send via Instagram
@@ -111,7 +105,16 @@ export async function handleReplyConversation(
     message: `Reply to @${username} — "${text.slice(0, 80)}"`,
   }, env);
 
-  return jsonResponse({ ok: true });
+  // Self-improving loop: if this reply was an edited Auto Draft, turn the delta
+  // into a proposed guideline rule for the agent to approve. Only after a
+  // confirmed send, so we never learn from a reply that failed to deliver.
+  let amendment = null;
+  if (body.aiSuggestion) {
+    const lastCustomer = [...(conv0?.messages || [])].reverse().find((m) => m.sender === "user");
+    amendment = await maybeProposeAmendment(env, lastCustomer?.text || "", body.aiSuggestion, text);
+  }
+
+  return jsonResponse({ ok: true, amendment });
 }
 
 /**

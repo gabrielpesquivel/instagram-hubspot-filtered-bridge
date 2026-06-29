@@ -15,12 +15,13 @@ interface EmailConn {
   connected_at?: string;
 }
 
-interface Correction {
+interface Amendment {
   id: string;
   at: string;
   customer: string;
   draft: string;
   corrected: string;
+  rule: string;
 }
 
 export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -33,8 +34,9 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
   const [signature, setSignature] = useState("");
   const [sigSaved, setSigSaved] = useState(false);
   const [useGmailSig, setUseGmailSig] = useState(false);
-  const [pendingFixes, setPendingFixes] = useState<Correction[]>([]);
-  const [approvedFixes, setApprovedFixes] = useState<Correction[]>([]);
+  const [pendingAmend, setPendingAmend] = useState<Amendment[]>([]);
+  const [learnedAmend, setLearnedAmend] = useState<Amendment[]>([]);
+  const [copied, setCopied] = useState(false);
 
   const refetch = useCallback(async () => {
     const [m, f, a, b, e, s] = await Promise.all([
@@ -52,36 +54,55 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
     setEmail(e);
     setSignature(s?.signature ?? "");
     setUseGmailSig(!!s?.useGmail);
-    fetchCorrections();
+    fetchAmendments();
   }, []);
 
-  async function fetchCorrections() {
+  async function fetchAmendments() {
     try {
-      const res = await fetch("/api/ai/corrections");
+      const res = await fetch("/api/ai/amendments");
       if (res.ok) {
         const d = await res.json();
-        setPendingFixes(d.pending || []);
-        setApprovedFixes(d.approved || []);
+        setPendingAmend(d.pending || []);
+        setLearnedAmend(d.learned || []);
       }
     } catch {
       /* ignore */
     }
   }
 
-  async function correctionAction(id: string, action: "approve" | "reject" | "delete") {
-    if (action === "approve") {
-      setPendingFixes((p) => p.filter((c) => c.id !== id));
-    } else if (action === "reject") {
-      setPendingFixes((p) => p.filter((c) => c.id !== id));
+  async function amendmentAction(
+    id: string | undefined,
+    action: "approve" | "reject" | "delete" | "clear-learned"
+  ) {
+    if (action === "approve" || action === "reject") {
+      setPendingAmend((p) => p.filter((c) => c.id !== id));
+    } else if (action === "delete") {
+      setLearnedAmend((p) => p.filter((c) => c.id !== id));
     } else {
-      setApprovedFixes((p) => p.filter((c) => c.id !== id));
+      setLearnedAmend([]);
     }
-    await fetch("/api/ai/corrections/action", {
+    await fetch("/api/ai/amendments/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, action }),
     });
-    fetchCorrections();
+    fetchAmendments();
+  }
+
+  function copyAllGuidelines() {
+    const text = learnedAmend.map((a) => `- ${a.rule}`).join("\n");
+    navigator.clipboard?.writeText(text).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => {}
+    );
+  }
+
+  function markMerged() {
+    if (!confirm("Clear all active guidelines? Do this only after folding them into the base prompt. The history log is kept.")) return;
+    amendmentAction(undefined, "clear-learned");
   }
 
   async function saveSignature() {
@@ -238,19 +259,23 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
             <AgentSettings settings={agent} onUpdate={refetch} />
           </div>
 
-          {/* AI training */}
-          <h3 style={styles.sectionTitle}>AI training</h3>
+          {/* AI guidelines */}
+          <h3 style={styles.sectionTitle}>AI guidelines</h3>
           <div style={styles.block}>
-            <div style={styles.blockLabel}>Pending lessons ({pendingFixes.length})</div>
+            <div style={styles.blockLabel}>Pending suggestions ({pendingAmend.length})</div>
             <p style={styles.hint}>
-              When you edit an Auto Draft before sending, the change is captured here. Approve the
-              ones that should teach the AI; reject the rest. Nothing affects replies until approved.
+              When you edit an Auto Draft before sending, the AI proposes a guideline rule here (and
+              pops it up in the inbox). Approve the ones worth keeping; reject the rest. Nothing
+              affects replies until approved.
             </p>
-            {pendingFixes.length === 0 ? (
-              <div style={{ ...styles.mutedText, marginTop: "0.5rem" }}>No pending lessons.</div>
+            {pendingAmend.length === 0 ? (
+              <div style={{ ...styles.mutedText, marginTop: "0.5rem" }}>No pending suggestions.</div>
             ) : (
-              pendingFixes.map((c) => (
+              pendingAmend.map((c) => (
                 <div key={c.id} style={styles.fixCard}>
+                  <div style={styles.fixRow}>
+                    <span style={styles.fixTagGood}>Proposed rule</span> {c.rule}
+                  </div>
                   <div style={styles.fixRow}>
                     <span style={styles.fixTag}>Customer</span> {c.customer || "—"}
                   </div>
@@ -262,10 +287,10 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
                     <span style={styles.fixTagGood}>You sent</span> {c.corrected}
                   </div>
                   <div style={styles.fixBtns}>
-                    <button style={styles.fixApprove} onClick={() => correctionAction(c.id, "approve")}>
+                    <button style={styles.fixApprove} onClick={() => amendmentAction(c.id, "approve")}>
                       Approve
                     </button>
-                    <button style={styles.fixReject} onClick={() => correctionAction(c.id, "reject")}>
+                    <button style={styles.fixReject} onClick={() => amendmentAction(c.id, "reject")}>
                       Reject
                     </button>
                   </div>
@@ -273,19 +298,31 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
               ))
             )}
 
-            {approvedFixes.length > 0 && (
+            {learnedAmend.length > 0 && (
               <>
                 <div style={{ ...styles.blockLabel, marginTop: "1rem" }}>
-                  Active lessons ({approvedFixes.length})
+                  Active guidelines ({learnedAmend.length})
                 </div>
-                <p style={styles.hint}>These are shaping replies now. Remove any that misfire.</p>
-                {approvedFixes.map((c) => (
+                <p style={styles.hint}>
+                  These rules are shaping replies now. Remove any that misfire. Periodically fold them
+                  into the base prompt: copy them, paste into the SYSTEM_PROMPT const, redeploy, then
+                  Mark as merged.
+                </p>
+                <div style={styles.fixBtns}>
+                  <button style={styles.fixApprove} onClick={copyAllGuidelines}>
+                    {copied ? "Copied ✓" : "Copy all guidelines"}
+                  </button>
+                  <button style={styles.fixReject} onClick={markMerged}>
+                    Mark as merged
+                  </button>
+                </div>
+                {learnedAmend.map((c) => (
                   <div key={c.id} style={styles.fixCardActive}>
                     <div style={styles.fixRow}>
-                      <span style={styles.fixTagGood}>Preferred</span> {c.corrected}
+                      <span style={styles.fixTagGood}>Rule</span> {c.rule}
                     </div>
                     <div style={styles.fixBtns}>
-                      <button style={styles.fixReject} onClick={() => correctionAction(c.id, "delete")}>
+                      <button style={styles.fixReject} onClick={() => amendmentAction(c.id, "delete")}>
                         Remove
                       </button>
                     </div>

@@ -132,6 +132,7 @@ Filter settings (follower threshold and skip-verified toggle) are adjustable fro
 - **Conversations** — View all active conversations, send replies, archive threads
 - **Pending Queue** — Approve, reject, or dismiss incoming messages from new senders
 - **AI Replies** — Generate and send Gemini-powered replies; per-conversation auto-reply toggle
+- **Self-improving guidelines** — When you edit an Auto Draft before sending, Gemini distils the change into a proposed guideline rule and pops it up in the inbox. Approve it and the rule is appended to the live prompt (see below) so future replies follow it. Manage rules in Settings → AI guidelines.
 - **Translation** — Non-English messages are translated for AI context; replies match the customer's language
 - **Blocklist** — Block/unblock users by username or sender ID
 - **Instagram Connection** — OAuth-based account connection with token expiry warnings
@@ -286,3 +287,4 @@ npx wrangler tail --format pretty
 - **Meta connection token** — Page tokens from Facebook Login are effectively permanent. Dashboard warns when the user token approaches expiry (~60 days). Reconnect via dashboard to refresh.
 - **Profile cache** — Expires after 24 hours (configurable via `CACHE_TTL_SECONDS`).
 - **Gemini model** — Configurable via dashboard Agent Settings. Default: `gemini-2.5-flash`.
+- **AI guidelines** — The agent's instructions are the `SYSTEM_PROMPT` const in `src/services/gemini-api.ts` (the base brand prompt) plus a "Learned Guidelines" layer stored in KV (`ai_guidelines_learned`) that approved rules append to. Approved rules are also kept in an append-only KV log (`ai_guidelines_log`). To bake the learned rules into the base prompt: in Settings → AI guidelines, **Copy all guidelines**, paste them into `SYSTEM_PROMPT`, redeploy, then **Mark as merged** to clear the live layer (the log is kept). There is no separate guidelines file — the prompt lives only in code + KV.

@@ -71,97 +71,177 @@ export interface GeminiSettings {
 }
 
 // ── Self-improving loop ──────────────────────────────────────────────────────
-// When an agent edits an Auto Draft before sending, we capture the (draft →
-// corrected) pair as a PENDING lesson. Pending lessons do nothing until the
-// agent approves them in Settings → AI; approved lessons are fed back into the
-// prompt so the model mirrors the agent's preferred wording over time.
-const PENDING_KEY = "ai_corrections_pending";
-const APPROVED_KEY = "ai_corrections_approved";
+// When an agent edits an Auto Draft before sending, we ask the model to turn the
+// (draft → corrected) delta into ONE reusable guideline rule. That rule pops up
+// for the agent immediately and, once approved, is appended to the system prompt
+// as a "Learned Guideline" so future replies follow it.
+//
+// Three KV lists:
+//  - ai_amendments_pending : proposed rules awaiting approval (capped)
+//  - ai_guidelines_learned : the LIVE approved rules fed into every prompt
+//                            (editable / removable; cleared after a periodic merge)
+//  - ai_guidelines_log     : append-only, uncapped history of every rule ever
+//                            approved — the durable record for folding the rules
+//                            back into the base SYSTEM_PROMPT const.
+const AMEND_PENDING_KEY = "ai_amendments_pending";
+const GUIDELINES_KEY = "ai_guidelines_learned";
+const GUIDELINES_LOG_KEY = "ai_guidelines_log";
 const MAX_PENDING = 50;
-const MAX_APPROVED = 40;
-const MAX_PROMPT_CORRECTIONS = 12;
+const MAX_LEARNED = 60;
+const MAX_PROMPT_GUIDELINES = 30;
 const CORRECTION_FIELD_CHARS = 280;
+const RULE_FIELD_CHARS = 400;
 
-export interface Correction {
+export interface Amendment {
   id: string;
   at: string;
   customer: string;
   draft: string;
   corrected: string;
+  rule: string;
 }
 
-function clip(s: string): string {
+function clip(s: string, max = CORRECTION_FIELD_CHARS): string {
   const t = s.trim();
-  return t.length > CORRECTION_FIELD_CHARS ? t.slice(0, CORRECTION_FIELD_CHARS) + "…" : t;
+  return t.length > max ? t.slice(0, max) + "…" : t;
 }
 
 function normalize(s: string): string {
   return s.trim().replace(/\s+/g, " ");
 }
 
-export async function getPendingCorrections(env: Env): Promise<Correction[]> {
-  return ((await env.PROFILE_CACHE.get(PENDING_KEY, "json")) as Correction[]) || [];
+export async function getPendingAmendments(env: Env): Promise<Amendment[]> {
+  return ((await env.PROFILE_CACHE.get(AMEND_PENDING_KEY, "json")) as Amendment[]) || [];
 }
 
-export async function getApprovedCorrections(env: Env): Promise<Correction[]> {
-  return ((await env.PROFILE_CACHE.get(APPROVED_KEY, "json")) as Correction[]) || [];
+export async function getLearnedGuidelines(env: Env): Promise<Amendment[]> {
+  return ((await env.PROFILE_CACHE.get(GUIDELINES_KEY, "json")) as Amendment[]) || [];
 }
 
-/** Capture an agent edit as a pending lesson (awaits approval before use). */
-export async function recordCorrection(
+export async function getGuidelinesLog(env: Env): Promise<Amendment[]> {
+  return ((await env.PROFILE_CACHE.get(GUIDELINES_LOG_KEY, "json")) as Amendment[]) || [];
+}
+
+/** Ask the model to distil an agent edit into ONE reusable guideline rule.
+ *  Returns null for cosmetic-only edits or on any error (fail-soft). */
+export async function proposeAmendment(
   env: Env,
   customer: string,
   draft: string,
   corrected: string
-): Promise<void> {
-  if (!draft || !corrected) return;
-  if (normalize(draft) === normalize(corrected)) return; // unedited — nothing to learn
+): Promise<string | null> {
+  if (!env.GEMINI_API_KEY) return null;
+  const settings = await getGeminiSettings(env);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent`;
 
-  const list = await getPendingCorrections(env);
-  list.push({
+  const existing = (await getLearnedGuidelines(env)).map((a) => `- ${a.rule}`).join("\n");
+  const instruction = `You maintain the writing guidelines for a customer-support AI. A human agent edited the AI's draft reply before sending. Given the customer's message, the AI's draft, and the human's corrected reply, write exactly ONE concise, imperative guideline rule (1-2 sentences) that — had it been in the guidelines — would have made the AI produce the corrected reply instead of the draft. State a general, reusable policy, not a one-off canned answer. Output ONLY the rule text with no preamble, numbering, or quotes. If the edit is purely cosmetic (typo, punctuation, spacing) with no real lesson, OR the lesson is already covered by an existing rule below, output exactly NONE.${existing ? `\n\nExisting rules:\n${existing}` : ""}`;
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: instruction }] },
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: `Customer said: "${customer}"\n\nAI draft: "${draft}"\n\nHuman corrected reply: "${corrected}"`,
+              },
+            ],
+          },
+        ],
+        generationConfig: { maxOutputTokens: 200, temperature: 0.2 },
+      }),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+    const result = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (!result || result.toUpperCase() === "NONE") return null;
+    return clip(result, RULE_FIELD_CHARS);
+  } catch {
+    return null;
+  }
+}
+
+/** On an edited send, propose a guideline rule and store it as pending. Returns
+ *  the created Amendment so the caller can surface it to the agent immediately,
+ *  or null when there is nothing to learn. */
+export async function maybeProposeAmendment(
+  env: Env,
+  customer: string,
+  draft: string,
+  corrected: string
+): Promise<Amendment | null> {
+  if (!draft || !corrected) return null;
+  if (normalize(draft) === normalize(corrected)) return null; // unedited — nothing to learn
+
+  const rule = await proposeAmendment(env, customer, draft, corrected);
+  if (!rule) return null;
+
+  const amendment: Amendment = {
     id: crypto.randomUUID(),
     at: new Date().toISOString(),
     customer: clip(customer),
     draft: clip(draft),
     corrected: clip(corrected),
-  });
-  await env.PROFILE_CACHE.put(PENDING_KEY, JSON.stringify(list.slice(-MAX_PENDING)));
+    rule,
+  };
+  const list = await getPendingAmendments(env);
+  list.push(amendment);
+  await env.PROFILE_CACHE.put(AMEND_PENDING_KEY, JSON.stringify(list.slice(-MAX_PENDING)));
+  return amendment;
 }
 
-/** Approve a pending lesson — move it into the active (approved) set. */
-export async function approveCorrection(env: Env, id: string): Promise<void> {
-  const pending = await getPendingCorrections(env);
-  const item = pending.find((c) => c.id === id);
+/** Approve a pending amendment — add it to the live guidelines (with optional
+ *  edited rule text) and append it to the permanent log. */
+export async function approveAmendment(env: Env, id: string, ruleOverride?: string): Promise<void> {
+  const pending = await getPendingAmendments(env);
+  const item = pending.find((a) => a.id === id);
   if (!item) return;
-  await env.PROFILE_CACHE.put(PENDING_KEY, JSON.stringify(pending.filter((c) => c.id !== id)));
-  const approved = await getApprovedCorrections(env);
-  approved.push(item);
-  await env.PROFILE_CACHE.put(APPROVED_KEY, JSON.stringify(approved.slice(-MAX_APPROVED)));
+  await env.PROFILE_CACHE.put(AMEND_PENDING_KEY, JSON.stringify(pending.filter((a) => a.id !== id)));
+
+  const rule = ruleOverride?.trim() ? clip(ruleOverride, RULE_FIELD_CHARS) : item.rule;
+  const approved: Amendment = { ...item, rule };
+
+  const learned = await getLearnedGuidelines(env);
+  learned.push(approved);
+  await env.PROFILE_CACHE.put(GUIDELINES_KEY, JSON.stringify(learned.slice(-MAX_LEARNED)));
+
+  const log = await getGuidelinesLog(env);
+  log.push(approved);
+  await env.PROFILE_CACHE.put(GUIDELINES_LOG_KEY, JSON.stringify(log));
 }
 
-/** Reject a pending lesson — discard it. */
-export async function rejectCorrection(env: Env, id: string): Promise<void> {
-  const pending = await getPendingCorrections(env);
-  await env.PROFILE_CACHE.put(PENDING_KEY, JSON.stringify(pending.filter((c) => c.id !== id)));
+/** Reject a pending amendment — discard it. */
+export async function rejectAmendment(env: Env, id: string): Promise<void> {
+  const pending = await getPendingAmendments(env);
+  await env.PROFILE_CACHE.put(AMEND_PENDING_KEY, JSON.stringify(pending.filter((a) => a.id !== id)));
 }
 
-/** Remove an already-approved lesson (e.g. if it turned out to be a bad one). */
-export async function deleteApprovedCorrection(env: Env, id: string): Promise<void> {
-  const approved = await getApprovedCorrections(env);
-  await env.PROFILE_CACHE.put(APPROVED_KEY, JSON.stringify(approved.filter((c) => c.id !== id)));
+/** Remove one rule from the LIVE guidelines (e.g. it misfired). The permanent
+ *  log is untouched. */
+export async function deleteLearnedGuideline(env: Env, id: string): Promise<void> {
+  const learned = await getLearnedGuidelines(env);
+  await env.PROFILE_CACHE.put(GUIDELINES_KEY, JSON.stringify(learned.filter((a) => a.id !== id)));
 }
 
-/** Build the prompt section that teaches the model from APPROVED lessons. */
-function buildLearnedBlock(corrections: Correction[]): string {
-  if (corrections.length === 0) return "";
-  const recent = corrections.slice(-MAX_PROMPT_CORRECTIONS);
-  const examples = recent
-    .map(
-      (c) =>
-        `Customer said: "${c.customer}"\nRejected draft: "${c.draft}"\nPreferred reply: "${c.corrected}"`
-    )
-    .join("\n---\n");
-  return `LEARNED FROM AGENT EDITS — A human reviewed and APPROVED these corrections to past AI drafts. The "Preferred reply" is the gold standard for tone, length, wording, and policy. When a similar situation comes up, answer in the style of the Preferred replies and avoid the patterns in the Rejected drafts. These corrections OVERRIDE the general guidance above when they conflict.\n\n${examples}`;
+/** Empty the live guidelines block — "mark as merged" once the rules have been
+ *  folded into the base SYSTEM_PROMPT const and redeployed. Log is untouched. */
+export async function clearLearnedGuidelines(env: Env): Promise<void> {
+  await env.PROFILE_CACHE.put(GUIDELINES_KEY, JSON.stringify([]));
+}
+
+/** Build the prompt section that layers APPROVED guideline rules on the base. */
+function buildLearnedGuidelinesBlock(rules: Amendment[]): string {
+  if (rules.length === 0) return "";
+  const recent = rules.slice(-MAX_PROMPT_GUIDELINES);
+  const lines = recent.map((a) => `- ${a.rule}`).join("\n");
+  return `LEARNED GUIDELINES — A human reviewed and APPROVED these additional rules based on past corrections to AI drafts. Follow them exactly. They OVERRIDE the general guidance above whenever they conflict.\n\n${lines}`;
 }
 
 export async function getGeminiSettings(env: Env): Promise<GeminiSettings> {
@@ -254,7 +334,7 @@ export async function generateReply(
   opts?: { shopify?: { customerEmail?: string } }
 ): Promise<string> {
   const settings = await getGeminiSettings(env);
-  const learnedBlock = buildLearnedBlock(await getApprovedCorrections(env));
+  const learnedBlock = buildLearnedGuidelinesBlock(await getLearnedGuidelines(env));
   const useShopify = !!opts?.shopify && shopifyConfigured(env);
 
   // Limit context to prevent overflow — keep most recent messages
