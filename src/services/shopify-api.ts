@@ -13,7 +13,7 @@ export interface ShopifyOrderSummary {
   customerName: string;
   email: string;
   totalPrice: string;        // "24.50 AUD"
-  lineItems: { title: string; quantity: number }[];
+  lineItems: { title: string; variantTitle?: string; quantity: number }[];
   tracking: { company?: string; number?: string; url?: string }[];
   shippingCountry?: string;
 }
@@ -27,7 +27,7 @@ interface OrderNode {
   currentTotalPriceSet: { presentmentMoney: { amount: string; currencyCode: string } } | null;
   customer: { firstName: string | null; lastName: string | null; email: string | null } | null;
   shippingAddress: { country: string | null } | null;
-  lineItems: { edges: { node: { title: string; quantity: number } }[] };
+  lineItems: { edges: { node: { title: string; variantTitle: string | null; quantity: number } }[] };
   fulfillments: { trackingInfo: { company: string | null; number: string | null; url: string | null }[] }[];
 }
 
@@ -43,7 +43,7 @@ const ORDERS_QUERY = `query($q: String!, $n: Int!) {
       currentTotalPriceSet { presentmentMoney { amount currencyCode } }
       customer { firstName lastName email }
       shippingAddress { country }
-      lineItems(first: 20) { edges { node { title quantity } } }
+      lineItems(first: 20) { edges { node { title variantTitle quantity } } }
       fulfillments { trackingInfo { company number url } }
     } }
   }
@@ -69,7 +69,13 @@ function normalize(node: OrderNode): ShopifyOrderSummary {
     customerName: `${first} ${last}`.trim(),
     email: node.customer?.email || "",
     totalPrice: money ? `${money.amount} ${money.currencyCode}` : "",
-    lineItems: node.lineItems.edges.map((e) => ({ title: e.node.title, quantity: e.node.quantity })),
+    lineItems: node.lineItems.edges.map((e) => {
+      // Shopify returns "Default Title" for products with no real variants — drop it as noise.
+      const variant = e.node.variantTitle && e.node.variantTitle !== "Default Title"
+        ? e.node.variantTitle
+        : undefined;
+      return { title: e.node.title, ...(variant ? { variantTitle: variant } : {}), quantity: e.node.quantity };
+    }),
     tracking,
     shippingCountry: node.shippingAddress?.country || undefined,
   };
