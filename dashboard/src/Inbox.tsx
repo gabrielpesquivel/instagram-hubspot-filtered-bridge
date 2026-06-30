@@ -115,7 +115,7 @@ interface ShopifyOrder {
   customerName: string;
   email: string;
   totalPrice: string;
-  lineItems: { title: string; quantity: number }[];
+  lineItems: { title: string; variantTitle?: string; quantity: number }[];
   tracking: { company?: string; number?: string; url?: string }[];
   shippingCountry?: string;
 }
@@ -927,6 +927,7 @@ export function Inbox() {
                         {o.lineItems.map((li, i) => (
                           <div key={i}>
                             {li.quantity}× {li.title}
+                            {li.variantTitle ? ` — ${li.variantTitle}` : ""}
                           </div>
                         ))}
                       </div>
