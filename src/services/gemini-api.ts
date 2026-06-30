@@ -325,7 +325,7 @@ const ACTION_TOOLS = [
       {
         name: "duplicate_order",
         description:
-          "The customer wants us to DUPLICATE or RESEND an existing order (e.g. lost in transit, wants the same order again). Provide the order number.",
+          "The customer wants us to DUPLICATE, RESEND, or send a REPLACEMENT for an existing order — e.g. lost in transit, never arrived, arrived damaged/faulty, wrong item received, or they just want the same order again. Provide the order number.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -372,7 +372,7 @@ function buildActionProposal(name: string, args: Record<string, unknown>): Actio
       : name === "update_email"
       ? `Update ${tail} email`
       : name === "duplicate_order"
-      ? `Duplicate/resend ${tail}`
+      ? `Duplicate/replace ${tail}`
       : name === "add_to_order"
       ? `Add items to ${tail}`
       : `${name} ${tail}`;
@@ -383,7 +383,7 @@ function actionInstruction(): string {
   return `ORDER ACTIONS — The customer may ask us to change an existing order. When they CLEARLY request one of these for a specific order, CALL the matching tool with the order number and new details:
 - update_address — change the shipping address
 - update_email — change the email on the order
-- duplicate_order — duplicate or resend the order
+- duplicate_order — duplicate, resend, or send a replacement for the order (lost, damaged/faulty, wrong item, or wants the same again)
 - add_to_order — add item(s) to the order
 A team member carries these out after confirming, so in your reply tell the customer you'll get it sorted / pass it on — do NOT claim it is already done. If the order number is unclear, still call the tool (leave order_number blank) and ask them for it in your reply. Do not call an action tool for general questions, quotes, or status checks.`;
 }
