@@ -191,13 +191,33 @@ const canvasToPng = (canvas: HTMLCanvasElement): Promise<ArrayBuffer> =>
     ),
   );
 
+// Ask the worker (fal.ai / BRIA RMBG-2.0, SOTA) to cut the background. Best on
+// the hard cases the local model fails: fine lines, low contrast, busy/weird
+// backgrounds. Returns PNG bytes, or null if the endpoint is unconfigured (503)
+// or errors — caller then falls back to the local @imgly model.
+async function removeBgViaServer(url: string): Promise<ArrayBuffer | null> {
+  try {
+    const resp = await fetch("/api/remove-bg", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    if (!resp.ok) return null;
+    const buf = await resp.arrayBuffer();
+    return buf.byteLength ? buf : null;
+  } catch {
+    return null;
+  }
+}
+
 // Fetch a customer-uploaded image and return PNG bytes for Pyodide/Pillow.
 // When removeBg is set, pick the right strategy per image:
 //   • flat solid background (logos, clipart) → corner-seeded flood-fill chroma
 //     key. Reliable even with no colour contrast (white-on-white) because it
 //     keys the actual background colour and stops at the artwork's outline.
-//   • busy / gradient / photographic background → @imgly neural model (downloads
-//     a WASM model on first use, then cached).
+//   • busy / gradient / photographic / low-contrast background → SOTA model on
+//     the worker (fal.ai / BRIA). Falls back to the local @imgly neural model
+//     if the server endpoint is unconfigured or errors.
 // Without removeBg, just re-encode through a canvas so webp/jpg/jpeg all reach
 // Pillow as PNG. Any failure returns an empty buffer, and the Python side falls
 // back to the yellow order-number tag.
@@ -212,7 +232,10 @@ async function fetchImageAsPng(url: string, removeBg: boolean): Promise<ArrayBuf
           return await canvasToPng(decoded.canvas);
         }
       }
-      // Non-uniform background (or decode failed): defer to the neural model.
+      // Non-uniform background (or decode failed): try the SOTA server model
+      // first, then fall back to the local neural model if it's unavailable.
+      const server = await removeBgViaServer(url);
+      if (server) return server;
       const { removeBackground } = await import("@imgly/background-removal");
       const blob = await removeBackground(url);
       return await blob.arrayBuffer();

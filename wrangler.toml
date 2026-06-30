@@ -63,6 +63,9 @@ SHOPIFY_API_VERSION = "2026-04"
 # - SHOPIFY_CLIENT_SECRET  (Shopify order lookup — client secret; exchanged for a 24h token)
 #                          NOTE: order WRITE actions (address/email/cancel/refund/
 #                          duplicate/add) need the `write_orders` scope on this app.
+# - FAL_KEY                     (fal.ai API key — SOTA gangsheet background removal,
+#                          BRIA RMBG-2.0; optional. When unset, /api/remove-bg returns
+#                          503 and the browser falls back to the local @imgly model.)
 # - STARSHIPIT_API_KEY          (StarShipit account API key — order writes; optional)
 # - STARSHIPIT_SUBSCRIPTION_KEY (StarShipit developer subscription key; optional)
 #                          When unset, StarShipit writes are skipped; Shopify writes still run.

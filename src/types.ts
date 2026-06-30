@@ -35,6 +35,12 @@ export interface Env {
   SHOPIFY_STORE_DOMAIN: string;
   SHOPIFY_API_VERSION: string;
 
+  // fal.ai API key — SOTA background removal (BRIA RMBG-2.0) for the gangsheet
+  // tool's hard images (fine lines, low contrast). Optional: when unset, the
+  // /api/remove-bg endpoint returns 503 and the browser falls back to the local
+  // @imgly model. See handlers/remove-bg.ts.
+  FAL_KEY: string;
+
   // StarShipit shipping/fulfilment API (order writes — address/email/cancel).
   // Two headers: per-account StarShipIT-Api-Key + Ocp-Apim-Subscription-Key.
   // Optional: when unset, StarShipit writes are skipped (dormant), Shopify

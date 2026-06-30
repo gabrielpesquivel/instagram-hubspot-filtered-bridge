@@ -63,6 +63,7 @@ import {
   handleSuggestInstagramThreadReply,
 } from "./handlers/instagram-inbox";
 import { handleGetAmendments, handleAmendmentAction } from "./handlers/ai";
+import { handleRemoveBackground } from "./handlers/remove-bg";
 import { handleShopifyOrderLookup, handleShopifyOrdersByEmail } from "./handlers/shopify";
 import {
   handleUpdateAddress,
@@ -345,6 +346,11 @@ export default {
     }
     if (path === "/api/settings/filter" && request.method === "POST") {
       return handleUpdateFilterSettings(request, env);
+    }
+
+    // SOTA background removal for the gangsheet tool (fal.ai / BRIA RMBG-2.0)
+    if (path === "/api/remove-bg" && request.method === "POST") {
+      return handleRemoveBackground(request, env);
     }
 
     // Daily gangsheet file uploads (R2)
