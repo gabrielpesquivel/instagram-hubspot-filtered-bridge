@@ -65,6 +65,16 @@ import {
 import { handleGetAmendments, handleAmendmentAction } from "./handlers/ai";
 import { handleShopifyOrderLookup, handleShopifyOrdersByEmail } from "./handlers/shopify";
 import {
+  handleUpdateAddress,
+  handleUpdateEmail,
+  handleCancelRefund,
+  handleDuplicateOrder,
+  handleAddToOrder,
+  handleParseAddress,
+  handleGetOrderItems,
+  handleSearchVariants,
+} from "./handlers/shopify-actions";
+import {
   handleGoogleAuthInit,
   handleGoogleCallback,
   handleGetEmailConnection,
@@ -277,6 +287,32 @@ export default {
     }
     if (path === "/api/shopify/orders" && request.method === "GET") {
       return handleShopifyOrdersByEmail(request, env);
+    }
+
+    // Shopify order WRITE actions (agent-confirmed; Shopify + StarShipit)
+    if (path === "/api/shopify/actions/update-address" && request.method === "POST") {
+      return handleUpdateAddress(request, env);
+    }
+    if (path === "/api/shopify/actions/update-email" && request.method === "POST") {
+      return handleUpdateEmail(request, env);
+    }
+    if (path === "/api/shopify/actions/cancel-refund" && request.method === "POST") {
+      return handleCancelRefund(request, env);
+    }
+    if (path === "/api/shopify/actions/duplicate-order" && request.method === "POST") {
+      return handleDuplicateOrder(request, env);
+    }
+    if (path === "/api/shopify/actions/add-to-order" && request.method === "POST") {
+      return handleAddToOrder(request, env);
+    }
+    if (path === "/api/shopify/actions/parse-address" && request.method === "POST") {
+      return handleParseAddress(request, env);
+    }
+    if (path === "/api/shopify/actions/order-items" && request.method === "GET") {
+      return handleGetOrderItems(request, env);
+    }
+    if (path === "/api/shopify/actions/search-variants" && request.method === "GET") {
+      return handleSearchVariants(request, env);
     }
 
     // AI guideline amendments (the self-improving loop)

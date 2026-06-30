@@ -35,6 +35,13 @@ export interface Env {
   SHOPIFY_STORE_DOMAIN: string;
   SHOPIFY_API_VERSION: string;
 
+  // StarShipit shipping/fulfilment API (order writes — address/email/cancel).
+  // Two headers: per-account StarShipIT-Api-Key + Ocp-Apim-Subscription-Key.
+  // Optional: when unset, StarShipit writes are skipped (dormant), Shopify
+  // writes still run. See services/starshipit-api.ts.
+  STARSHIPIT_API_KEY: string;
+  STARSHIPIT_SUBSCRIPTION_KEY: string;
+
   // Configuration
   FILTER_MIN_FOLLOWERS: string;
   CACHE_TTL_SECONDS: string;

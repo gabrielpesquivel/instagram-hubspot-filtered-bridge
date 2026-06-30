@@ -1,6 +1,6 @@
 // Event bus (mirrors toast.tsx / amendment.ts) for proposed order actions the
-// AI detected while drafting. For now these are detection-only — the Yes/No
-// popup confirms intent; nothing hits Shopify yet.
+// AI detected while drafting. The ActionPrompt card's "Review" opens a per-type
+// modal that writes to Shopify (+ StarShipit) via /api/shopify/actions/*.
 export interface ActionProposal {
   id: string;
   type: string;

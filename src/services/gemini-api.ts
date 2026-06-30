@@ -325,11 +325,25 @@ const ACTION_TOOLS = [
       {
         name: "duplicate_order",
         description:
-          "The customer wants us to DUPLICATE, RESEND, or send a REPLACEMENT for an existing order — e.g. lost in transit, never arrived, arrived damaged/faulty, wrong item received, or they just want the same order again. Provide the order number.",
+          "The customer wants us to DUPLICATE, RESEND, or send a REPLACEMENT for an existing order — e.g. lost in transit, never arrived, arrived damaged/faulty, wrong item received, or they just want the same order again. Provide the order number. If they only mention SPECIFIC items being lost/damaged/wrong (not the whole order), list ONLY those items so we replace just those; leave items blank to replace the entire order.",
         parameters: {
           type: "OBJECT",
           properties: {
             order_number: { type: "STRING", description: "Order number, with or without '#'. Leave blank if not yet known." },
+            items: { type: "STRING", description: "Only the specific items to replace, as the customer described them (e.g. 'Italy flag transfer, Wales flag'). Leave blank to replace the whole order." },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "cancel_refund",
+        description:
+          "The customer wants to CANCEL their order and/or get a REFUND. Use for cancellation requests, 'I want my money back', changed-their-mind, ordered-by-mistake, or a partial refund. Provide the order number, and the reason as stated.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            order_number: { type: "STRING", description: "Order number, with or without '#'. Leave blank if not yet known." },
+            reason: { type: "STRING", description: "Why they want to cancel/refund, as the customer stated it." },
           },
           required: [],
         },
@@ -351,7 +365,7 @@ const ACTION_TOOLS = [
   },
 ];
 
-const ACTION_NAMES = new Set(["update_address", "update_email", "duplicate_order", "add_to_order"]);
+const ACTION_NAMES = new Set(["update_address", "update_email", "duplicate_order", "add_to_order", "cancel_refund"]);
 
 export interface ActionProposal {
   id: string;
@@ -375,6 +389,8 @@ function buildActionProposal(name: string, args: Record<string, unknown>): Actio
       ? `Duplicate/replace ${tail}`
       : name === "add_to_order"
       ? `Add items to ${tail}`
+      : name === "cancel_refund"
+      ? `Cancel/refund ${tail}`
       : `${name} ${tail}`;
   return { id: crypto.randomUUID(), type: name, orderNumber: order || undefined, summary, args };
 }
@@ -383,8 +399,9 @@ function actionInstruction(): string {
   return `ORDER ACTIONS — The customer may ask us to change an existing order. When they CLEARLY request one of these for a specific order, CALL the matching tool with the order number and new details:
 - update_address — change the shipping address
 - update_email — change the email on the order
-- duplicate_order — duplicate, resend, or send a replacement for the order (lost, damaged/faulty, wrong item, or wants the same again)
+- duplicate_order — duplicate, resend, or send a replacement for the order (lost, damaged/faulty, wrong item, or wants the same again); list only the specific items if they name them
 - add_to_order — add item(s) to the order
+- cancel_refund — cancel the order and/or refund the customer
 A team member carries these out after confirming, so in your reply tell the customer you'll get it sorted / pass it on — do NOT claim it is already done. If the order number is unclear, still call the tool (leave order_number blank) and ask them for it in your reply. Do not call an action tool for general questions, quotes, or status checks.`;
 }
 
@@ -629,4 +646,52 @@ export async function translateMessage(
   const result = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
   if (!result || result === "ALREADY_ENGLISH") return null;
   return result;
+}
+
+export interface ParsedAddress {
+  firstName?: string;
+  lastName?: string;
+  company?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  province?: string;
+  zip?: string;
+  country?: string;
+  phone?: string;
+}
+
+/** Parse a free-text address (as a customer typed it) into structured fields for
+ *  the agent to review before we write it to Shopify/StarShipit. Best-effort:
+ *  returns {} on any failure so the agent just fills the form manually. */
+export async function parseAddress(text: string, env: Env): Promise<ParsedAddress> {
+  const settings = await getGeminiSettings(env);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent`;
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text:
+          "Parse the shipping address into JSON with keys: firstName, lastName, company, address1, address2, city, province, zip, country. " +
+          "address1 = street number + name; address2 = unit/apt/suite if any; province = state/region/county; zip = postal/zip code; country = full country name. " +
+          "Use the recipient name for firstName/lastName if present. Omit keys you can't determine. Reply with ONLY the JSON object." }] },
+        contents: [{ role: "user", parts: [{ text }] }],
+        generationConfig: { maxOutputTokens: 400, temperature: 0, responseMimeType: "application/json" },
+      }),
+    });
+    if (!response.ok) return {};
+    const data = (await response.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const pick = (k: string) => (typeof parsed[k] === "string" ? (parsed[k] as string).trim() || undefined : undefined);
+    return {
+      firstName: pick("firstName"), lastName: pick("lastName"), company: pick("company"),
+      address1: pick("address1"), address2: pick("address2"), city: pick("city"),
+      province: pick("province"), zip: pick("zip"), country: pick("country"), phone: pick("phone"),
+    };
+  } catch {
+    return {};
+  }
 }

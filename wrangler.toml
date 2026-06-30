@@ -61,3 +61,8 @@ SHOPIFY_API_VERSION = "2026-04"
 # - GOOGLE_CLIENT_SECRET   (Email Manager — Gmail OAuth)
 # - SHOPIFY_CLIENT_ID      (Shopify order lookup — Dev Dashboard app client ID)
 # - SHOPIFY_CLIENT_SECRET  (Shopify order lookup — client secret; exchanged for a 24h token)
+#                          NOTE: order WRITE actions (address/email/cancel/refund/
+#                          duplicate/add) need the `write_orders` scope on this app.
+# - STARSHIPIT_API_KEY          (StarShipit account API key — order writes; optional)
+# - STARSHIPIT_SUBSCRIPTION_KEY (StarShipit developer subscription key; optional)
+#                          When unset, StarShipit writes are skipped; Shopify writes still run.
