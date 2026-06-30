@@ -410,8 +410,9 @@ function shopifyInstruction(customerEmail?: string): string {
     ? `The customer's email is ${customerEmail} — use lookup_orders_by_email with it unless they give a specific order number.`
     : `Ask for or infer the order number or email from the conversation.`;
   return `LIVE ORDER LOOKUP (this supersedes guardrail 7 for this email — use live data instead of asking them for their order details):
-You have tools to fetch real Shopify order and tracking data. When the customer asks about their order status, shipping, tracking, delivery, or a damaged/missing item, CALL the appropriate tool and answer directly from the result. ${emailLine}
+You have tools to fetch real Shopify order and tracking data. When the customer asks about their order status, shipping, tracking, or delivery, CALL a lookup tool and answer directly from the result. ${emailLine}
 If a lookup returns no order, then (and only then) fall back to asking them to confirm their order number or email.
+If their order is lost, damaged/faulty, wrong, or they want it resent, look it up to confirm the order, then also use the duplicate_order action — looking up the data does not replace taking the action.
 GREEN-FACT MARKERS: wrap every sentence that states a fact taken from the live order data (status, tracking number/carrier, item, date, total, address) in ⟦ ⟧ delimiters — e.g. "⟦Your order #17725 is paid and currently unfulfilled.⟧". Only wrap sentences containing live order facts; leave greetings, apologies, and generic text unwrapped. Never mention these markers to the customer.`;
 }
 
