@@ -153,7 +153,10 @@ export async function proposeAmendment(
             ],
           },
         ],
-        generationConfig: { maxOutputTokens: 200, temperature: 0.2 },
+        // 2.5-flash is a thinking model; with thinking on, hidden reasoning
+        // tokens eat the output budget and truncate the rule mid-sentence.
+        // Disable thinking for this short deterministic task.
+        generationConfig: { maxOutputTokens: 256, temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } },
       }),
     });
     if (!response.ok) return null;
@@ -599,7 +602,7 @@ export async function detectLanguage(
       body: JSON.stringify({
         system_instruction: { parts: [{ text: "Detect the language of the text. Reply with ONLY the ISO 639-1 two-letter language code in uppercase (e.g. EN, ES, AR, FR, DE, PT, ZH, JA, KO). Nothing else." }] },
         contents: [{ role: "user", parts: [{ text }] }],
-        generationConfig: { maxOutputTokens: 4, temperature: 0 },
+        generationConfig: { maxOutputTokens: 8, temperature: 0, thinkingConfig: { thinkingBudget: 0 } },
       }),
     });
 
@@ -633,7 +636,7 @@ export async function translateMessage(
     body: JSON.stringify({
       system_instruction: { parts: [{ text: "If the text is not in English, translate it to English. Reply with ONLY the translation, nothing else. If it is already in English, reply with exactly: ALREADY_ENGLISH" }] },
       contents: [{ role: "user", parts: [{ text }] }],
-      generationConfig: { maxOutputTokens: 200, temperature: 0 },
+      generationConfig: { maxOutputTokens: 400, temperature: 0, thinkingConfig: { thinkingBudget: 0 } },
     }),
   });
 
@@ -677,7 +680,7 @@ export async function parseAddress(text: string, env: Env): Promise<ParsedAddres
           "address1 = street number + name; address2 = unit/apt/suite if any; province = state/region/county; zip = postal/zip code; country = full country name. " +
           "Use the recipient name for firstName/lastName if present. Omit keys you can't determine. Reply with ONLY the JSON object." }] },
         contents: [{ role: "user", parts: [{ text }] }],
-        generationConfig: { maxOutputTokens: 400, temperature: 0, responseMimeType: "application/json" },
+        generationConfig: { maxOutputTokens: 400, temperature: 0, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } },
       }),
     });
     if (!response.ok) return {};
