@@ -102,24 +102,72 @@ type FormProps = { proposal: ActionProposal; onClose: () => void; onDone: () => 
 interface Addr { firstName: string; lastName: string; company: string; address1: string; address2: string; city: string; province: string; zip: string; country: string; phone: string; }
 const EMPTY_ADDR: Addr = { firstName: "", lastName: "", company: "", address1: "", address2: "", city: "", province: "", zip: "", country: "", phone: "" };
 
+/** Coerce an unknown address-shaped object (from the API) into a full Addr with
+ *  string fields — undefined/missing keys become "". */
+function toAddr(raw: unknown): Addr {
+  const a = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const s = (v: unknown) => (typeof v === "string" ? v : "");
+  return {
+    firstName: s(a.firstName), lastName: s(a.lastName), company: s(a.company),
+    address1: s(a.address1), address2: s(a.address2), city: s(a.city),
+    province: s(a.province), zip: s(a.zip), country: s(a.country), phone: s(a.phone),
+  };
+}
+
 function AddressForm({ proposal, onDone }: FormProps) {
   const [order, setOrder] = useState(cleanOrder(proposal.orderNumber || arg(proposal, "order_number")));
   const [addr, setAddr] = useState<Addr>(EMPTY_ADDR);
+  const [search, setSearch] = useState(arg(proposal, "new_address"));
   const [parsing, setParsing] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    const raw = arg(proposal, "new_address");
+  // Parse a free-text address into the structured fields (Gemini). Merges only
+  // the fields it resolves, so a partial paste doesn't wipe existing values.
+  async function autofill(text: string) {
+    const raw = text.trim();
     if (!raw) return;
     setParsing(true);
-    fetch("/api/shopify/actions/parse-address", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: raw }),
-    })
-      .then((r) => r.json())
-      .then((d: { address?: Partial<Addr> }) => setAddr({ ...EMPTY_ADDR, ...d.address }))
-      .catch(() => {})
-      .finally(() => setParsing(false));
-  }, [proposal]);
+    try {
+      const r = await fetch("/api/shopify/actions/parse-address", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: raw }),
+      });
+      const d = (await r.json().catch(() => ({}))) as { address?: Partial<Addr> };
+      const parsed = d.address || {};
+      setAddr((p) => {
+        const next = { ...p };
+        (Object.keys(EMPTY_ADDR) as (keyof Addr)[]).forEach((k) => {
+          const v = parsed[k];
+          if (typeof v === "string" && v.trim()) next[k] = v.trim();
+        });
+        return next;
+      });
+    } catch { /* leave fields as-is */ }
+    finally { setParsing(false); }
+  }
+
+  // Pre-load the order's CURRENT shipping address so the form isn't blank — the
+  // agent edits from the real starting point instead of retyping everything.
+  async function loadCurrent(num: string) {
+    const clean = cleanOrder(num);
+    if (!clean) return;
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/shopify/actions/order-items?name=${encodeURIComponent(clean)}`);
+      const d = (await r.json().catch(() => ({}))) as { shippingAddress?: unknown };
+      if (r.ok && d.shippingAddress) setAddr(toAddr(d.shippingAddress));
+    } catch { /* ignore — agent can fill manually */ }
+    finally { setLoading(false); }
+  }
+
+  // On open: if the AI captured the customer's requested new address, parse that;
+  // otherwise pre-load the order's current address for editing.
+  useEffect(() => {
+    const requested = arg(proposal, "new_address");
+    if (requested) autofill(requested);
+    else if (order) loadCurrent(order);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const set = (k: keyof Addr) => (e: React.ChangeEvent<HTMLInputElement>) => setAddr((p) => ({ ...p, [k]: e.target.value }));
 
@@ -139,8 +187,27 @@ function AddressForm({ proposal, onDone }: FormProps) {
       {arg(proposal, "new_address") && (
         <div style={styles.quote}>Customer: “{arg(proposal, "new_address")}”</div>
       )}
-      <OrderField value={order} onChange={setOrder} />
-      {parsing && <div style={styles.hint}>Parsing address…</div>}
+      <div style={styles.row2}>
+        <OrderField value={order} onChange={setOrder} />
+        <button style={styles.loadBtn} disabled={loading} onClick={() => loadCurrent(order)}>
+          {loading ? "Loading…" : "Load current"}
+        </button>
+      </div>
+
+      {/* Paste/type any address → Gemini parses it into the fields below. */}
+      <div style={styles.searchWrap}>
+        <textarea
+          style={styles.searchArea}
+          placeholder="Search: paste or type a full address to autofill the fields…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) autofill(search); }}
+        />
+        <button style={styles.loadBtn} disabled={parsing} onClick={() => autofill(search)}>
+          {parsing ? "Reading…" : "Autofill"}
+        </button>
+      </div>
+
       <div style={styles.row2}>
         <Input ph="First name" value={addr.firstName} onChange={set("firstName")} />
         <Input ph="Last name" value={addr.lastName} onChange={set("lastName")} />
@@ -385,6 +452,8 @@ const styles: Record<string, React.CSSProperties> = {
   body: { padding: "1rem 1.1rem", display: "flex", flexDirection: "column", gap: "0.55rem" },
   quote: { fontSize: "0.8rem", fontStyle: "italic", color: "var(--text-muted)", background: "var(--surface-2)", borderRadius: "8px", padding: "0.5rem 0.6rem" },
   hint: { fontSize: "0.75rem", color: "var(--text-faint)" },
+  searchWrap: { display: "flex", gap: "0.5rem", alignItems: "stretch" },
+  searchArea: { flex: 1, minHeight: "38px", maxHeight: "96px", padding: "0.5rem 0.65rem", background: "var(--surface-2)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "0.85rem", fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" },
   err: { fontSize: "0.8rem", color: "#d32f2f" },
   row2: { display: "flex", gap: "0.5rem" },
   input: { flex: 1, padding: "0.5rem 0.65rem", background: "var(--surface-2)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "0.85rem", width: "100%", boxSizing: "border-box" },

@@ -181,10 +181,21 @@ WEBSITE REFERENCE (email only): When pointing the customer to our website, say "
 
     // Give the AI the customer's email so it can pull their live Shopify orders
     // (Feature 3) instead of deflecting order questions to info@bootink.com.
-    const customerEmail = emailFromHeader(detail.replyTo || firstCustomer?.from || "");
+    // Website contact-form emails arrive From the store/form sender with the real
+    // customer address in an "Email:" body line — prefer that (same reason we take
+    // the name from the body above), otherwise the Shopify lookup runs against the
+    // store's own address and finds nothing.
+    const customerEmail =
+      formEmailFrom(firstCustomer?.text || "") ||
+      emailFromHeader(detail.replyTo || firstCustomer?.from || "");
+    // Detect an order number in the customer's messages so the lookup can fall
+    // back to it if the email match fails (order placed under another address, a
+    // contact-form sender, etc.).
+    const customerText = detail.messages.filter((m) => !m.fromUs).map((m) => m.text).join("\n");
+    const orderNumber = orderNumberFrom(customerText);
     const actions: ActionProposal[] = [];
     const suggestion = await generateReply(messages, env, emailInstruction, {
-      shopify: { customerEmail },
+      shopify: { customerEmail, orderNumber: orderNumber || undefined },
       collectActions: actions,
     });
     return jsonResponse({ suggestion, subject: detail.subject, actions });
@@ -405,6 +416,25 @@ export async function handleSendEmailReply(
 function emailFromHeader(from: string): string {
   const m = from.match(/<([^>]+)>/);
   const addr = (m ? m[1] : from).trim().toLowerCase();
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr) ? addr : "";
+}
+
+// Detect a Shopify order number in the customer's text: a "#12541" token, or a
+// labelled "order [number/no/#] 12541". Requires 3-7 digits to avoid matching
+// quantities ("ordered 5"). Returns "" when none is found.
+function orderNumberFrom(text: string): string {
+  const hash = text.match(/#\s?(\d{3,7})\b/);
+  if (hash) return hash[1];
+  const labelled = text.match(/\border(?:\s*(?:number|no\.?|#))?\s*[:#]?\s*(\d{3,7})\b/i);
+  return labelled ? labelled[1] : "";
+}
+
+// Pull the customer's email from a contact-form body's "Email:" line (handles
+// "Email", "E-mail", "Email address" with ":" or "-"). Returns "" when absent or
+// malformed so the caller falls back to the From/Reply-To header.
+function formEmailFrom(body: string): string {
+  const m = body.match(/^\s*e-?mail(?:\s*address)?\s*[:\-]\s*(.+)$/im);
+  const addr = (m ? m[1] : "").trim().toLowerCase();
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr) ? addr : "";
 }
 

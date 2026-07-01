@@ -25,6 +25,7 @@ import {
   createReplacementOrder,
   addItemsToOrder,
   searchProductVariants,
+  canonCountry,
   type StructuredAddress,
   type OrderWriteContext,
 } from "../services/shopify-api";
@@ -66,12 +67,17 @@ async function guard(request: Request, env: Env): Promise<Response | Record<stri
   }
 }
 
+// Shown when Shopify returns no order for a number the customer says exists —
+// by far the most common cause is the 60-day order visibility limit.
+const NOT_FOUND_HINT =
+  "If it exists, it may be older than 60 days — the Shopify app needs the read_all_orders scope to see orders past 60 days.";
+
 /** Resolve the order or return a 404 Response. */
 async function loadOrder(env: Env, orderNumber: string): Promise<OrderWriteContext | Response> {
-  const clean = String(orderNumber || "").trim();
+  const clean = String(orderNumber || "").trim().replace(/^#/, "");
   if (!clean) return jsonResponse({ error: "Missing order number" }, 400);
   const ctx = await getOrderForWrite(env, clean);
-  if (!ctx) return jsonResponse({ error: `Order ${clean} not found` }, 404);
+  if (!ctx) return jsonResponse({ error: `Order #${clean} not found. ${NOT_FOUND_HINT}` }, 404);
   return ctx;
 }
 
@@ -85,7 +91,7 @@ function toStarShipit(addr: StructuredAddress): StarShipitAddress {
     city: addr.city,
     state: addr.province,
     post_code: addr.zip,
-    country: addr.country,
+    country: canonCountry(addr.country),
   };
 }
 
@@ -283,7 +289,7 @@ export async function handleGetOrderItems(request: Request, env: Env): Promise<R
   if (!name) return jsonResponse({ error: "Missing order name" }, 400);
   try {
     const ctx = await getOrderForWrite(env, name);
-    if (!ctx) return jsonResponse({ error: `Order ${name} not found` }, 404);
+    if (!ctx) return jsonResponse({ error: `Order #${String(name).replace(/^#/, "")} not found. ${NOT_FOUND_HINT}` }, 404);
     return jsonResponse({
       order: ctx.name,
       email: ctx.email,

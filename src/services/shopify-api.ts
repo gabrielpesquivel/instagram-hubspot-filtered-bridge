@@ -175,15 +175,23 @@ async function cached<T>(env: Env, key: string, fetcher: () => Promise<T>): Prom
     }
   }
   const value = await fetcher();
+  // Never cache an empty result. queryOrders() is fail-soft — it returns [] on a
+  // transport/auth/GraphQL error just as it does for a genuine "no such order".
+  // Caching that would pin a "not found" for the full TTL even after a transient
+  // Shopify hiccup clears, so the agent keeps seeing "order not found" on retry.
+  if (Array.isArray(value) && value.length === 0) return value;
   await env.PROFILE_CACHE.put(key, JSON.stringify(value), { expirationTtl: CACHE_TTL });
   return value;
 }
 
 // "#1001" / "1001" -> a Shopify `name:` filter. Shopify stores names with the
-// "#", and the search syntax matches with or without it.
+// "#", but tokenises it away in the search index, so match both the "#1001" and
+// "1001" forms with an OR to be robust to how a given order name got indexed.
+// (This is a syntax safeguard only — it can't surface orders the app can't see,
+// e.g. those older than 60 days without the read_all_orders scope.)
 function nameFilter(raw: string): string {
   const n = raw.trim().replace(/^#/, "");
-  return `name:#${n}`;
+  return `name:#${n} OR name:${n}`;
 }
 
 /** Look up a single order by name/number ("#1001" or "1001"). Returns 0-1. */
@@ -204,8 +212,11 @@ export async function findOrdersByEmail(
 ): Promise<ShopifyOrderSummary[]> {
   const clean = email.trim().toLowerCase();
   if (!clean) return [];
+  // Quote the email: it contains "@" and "." which Shopify's search parser
+  // treats as token separators. Unquoted (`email:bob@gmail.com`) the lookup
+  // often returns nothing or the wrong order; quoted it's an exact match.
   return cached(env, `shopify_orders:${clean}`, () =>
-    queryOrders(env, `email:${clean}`, limit)
+    queryOrders(env, `email:"${clean}"`, limit)
   );
 }
 
@@ -309,7 +320,7 @@ export async function getOrderForWrite(env: Env, name: string): Promise<OrderWri
       shippingAddress: AddrNode | null;
       lineItems: { edges: { node: { id: string; title: string; quantity: number; variant: { id: string } | null } }[] };
     } }[] };
-  }>(env, ORDER_CTX_QUERY, { q: `name:#${clean}` });
+  }>(env, ORDER_CTX_QUERY, { q: `name:#${clean} OR name:${clean}` });
   const node = data.orders.edges[0]?.node;
   if (!node) return null;
   const a = node.shippingAddress;
@@ -361,6 +372,39 @@ export async function searchProductVariants(env: Env, q: string): Promise<Varian
   }));
 }
 
+// Shopify's MailingAddressInput.country wants a canonical English country name —
+// it rejects common free-text/customer variants like "UK", "USA", "England".
+// Map the variants we actually see (BootInk's ship-to list + obvious aliases) to
+// the name Shopify accepts; anything not listed is passed through unchanged.
+const COUNTRY_CANON: Record<string, string> = {
+  "australia": "Australia", "au": "Australia", "aus": "Australia",
+  "new zealand": "New Zealand", "nz": "New Zealand", "nzl": "New Zealand",
+  "united states": "United States", "united states of america": "United States",
+  "usa": "United States", "us": "United States", "u s a": "United States", "america": "United States",
+  "canada": "Canada", "can": "Canada",
+  "united kingdom": "United Kingdom", "uk": "United Kingdom", "u k": "United Kingdom",
+  "great britain": "United Kingdom", "britain": "United Kingdom", "gb": "United Kingdom", "gbr": "United Kingdom",
+  "england": "United Kingdom", "scotland": "United Kingdom", "wales": "United Kingdom", "northern ireland": "United Kingdom",
+  "austria": "Austria", "belgium": "Belgium", "denmark": "Denmark",
+  "france": "France", "germany": "Germany", "deutschland": "Germany",
+  "iceland": "Iceland", "ireland": "Ireland", "italy": "Italy", "italia": "Italy",
+  "monaco": "Monaco", "netherlands": "Netherlands", "the netherlands": "Netherlands", "holland": "Netherlands",
+  "norway": "Norway", "poland": "Poland", "polska": "Poland", "portugal": "Portugal",
+  "spain": "Spain", "espana": "Spain", "españa": "Spain", "sweden": "Sweden", "switzerland": "Switzerland",
+  "singapore": "Singapore", "hong kong": "Hong Kong", "japan": "Japan", "nippon": "Japan",
+  "south korea": "South Korea", "korea": "South Korea", "republic of korea": "South Korea",
+};
+
+/** Normalise a free-text country to the canonical name Shopify accepts. Strips
+ *  punctuation and case so "U.S.A." / "u.k." resolve; unknown values pass through
+ *  so we never block a valid-but-unlisted country. */
+export function canonCountry(raw: string | undefined): string {
+  const c = (raw || "").trim();
+  if (!c) return c;
+  const key = c.toLowerCase().replace(/[.]/g, "").replace(/\s+/g, " ");
+  return COUNTRY_CANON[key] || c;
+}
+
 const ORDER_UPDATE = `mutation($input: OrderInput!) {
   orderUpdate(input: $input) {
     order { id }
@@ -368,19 +412,48 @@ const ORDER_UPDATE = `mutation($input: OrderInput!) {
   }
 }`;
 
-/** Overwrite the shipping address on an order. */
-export async function updateShippingAddress(env: Env, orderId: string, addr: StructuredAddress): Promise<void> {
+// userError messages that mean "the province/region doesn't fit the country" —
+// used to decide whether dropping the province and retrying is worth a shot.
+const ADDRESS_REGION_ERROR = /provinc|countr|\bregion\b|\bstate\b|\bzone\b/i;
+
+/** One orderUpdate with the given shippingAddress; throws joined userErrors. */
+async function runShippingAddressUpdate(
+  env: Env,
+  orderId: string,
+  shippingAddress: Record<string, unknown>
+): Promise<void> {
   const data = await adminGraphQL<{ orderUpdate: { userErrors: { field?: string[]; message: string }[] } }>(
     env,
     ORDER_UPDATE,
-    { input: { id: orderId, shippingAddress: {
-      firstName: addr.firstName, lastName: addr.lastName, company: addr.company,
-      address1: addr.address1, address2: addr.address2, city: addr.city,
-      province: addr.province, zip: addr.zip, country: addr.country, phone: addr.phone,
-    } } }
+    { input: { id: orderId, shippingAddress } }
   );
   const err = joinUserErrors(data.orderUpdate.userErrors);
   if (err) throw new Error(err);
+}
+
+/** Overwrite the shipping address on an order. Hardened against the two ways
+ *  Shopify rejects an otherwise-fine address:
+ *   1. Country aliases ("UK"/"USA"/"England") → normalise to the canonical name.
+ *   2. A province that doesn't belong to the destination country (most UK/EU/Asia
+ *      addresses have no Shopify subdivision) → retry once without the province if
+ *      the first attempt fails on a province/country/region error. */
+export async function updateShippingAddress(env: Env, orderId: string, addr: StructuredAddress): Promise<void> {
+  const base: Record<string, unknown> = {
+    firstName: addr.firstName, lastName: addr.lastName, company: addr.company,
+    address1: addr.address1, address2: addr.address2, city: addr.city,
+    zip: addr.zip, country: canonCountry(addr.country), phone: addr.phone,
+  };
+  const province = addr.province?.trim();
+  try {
+    await runShippingAddressUpdate(env, orderId, province ? { ...base, province } : base);
+  } catch (error) {
+    if (province && error instanceof Error && ADDRESS_REGION_ERROR.test(error.message)) {
+      // Province likely doesn't apply to this country — drop it and retry once.
+      await runShippingAddressUpdate(env, orderId, base);
+      return;
+    }
+    throw error;
+  }
 }
 
 /** Change the email on an order. */
@@ -507,7 +580,7 @@ export async function createReplacementOrder(
         firstName: opts.shippingAddress.firstName, lastName: opts.shippingAddress.lastName,
         address1: opts.shippingAddress.address1, address2: opts.shippingAddress.address2,
         city: opts.shippingAddress.city, province: opts.shippingAddress.province,
-        zip: opts.shippingAddress.zip, country: opts.shippingAddress.country,
+        zip: opts.shippingAddress.zip, country: canonCountry(opts.shippingAddress.country),
         phone: opts.shippingAddress.phone,
       },
       lineItems: opts.items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),

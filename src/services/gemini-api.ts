@@ -409,10 +409,13 @@ A team member carries these out after confirming, so in your reply tell the cust
 }
 
 // Execute a tool call and return a plain object for the functionResponse.
+// `hint.orderNumber` is an order number detected server-side in the customer's
+// message; it powers the automatic email→number fallback below.
 async function runShopifyTool(
   env: Env,
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  hint?: { orderNumber?: string }
 ): Promise<Record<string, unknown>> {
   if (name === "lookup_order_by_number") {
     const order = await findOrderByName(env, String(args.order_number ?? ""));
@@ -420,17 +423,27 @@ async function runShopifyTool(
   }
   if (name === "lookup_orders_by_email") {
     const orders = await findOrdersByEmail(env, String(args.email ?? ""));
+    if (orders.length === 0 && hint?.orderNumber) {
+      // The email didn't match any order (e.g. placed under a different address,
+      // or a contact-form sender). Fall back to the order number we detected in
+      // their message before giving up, so a valid order isn't reported missing.
+      const byNumber = await findOrderByName(env, hint.orderNumber);
+      if (byNumber) return { count: 1, orders: [byNumber], matchedBy: "order_number_fallback" };
+    }
     return { count: orders.length, orders };
   }
   return { error: `unknown function: ${name}` };
 }
 
-function shopifyInstruction(customerEmail?: string): string {
+function shopifyInstruction(customerEmail?: string, orderNumber?: string): string {
   const emailLine = customerEmail
     ? `The customer's email is ${customerEmail} — use lookup_orders_by_email with it unless they give a specific order number.`
     : `Ask for or infer the order number or email from the conversation.`;
+  const orderLine = orderNumber
+    ? ` An order number was detected in their email: #${orderNumber}. If lookup_orders_by_email returns no orders, call lookup_order_by_number with #${orderNumber} before falling back to asking.`
+    : "";
   return `LIVE ORDER LOOKUP (this supersedes guardrail 7 for this email — use live data instead of asking them for their order details):
-You have tools to fetch real Shopify order and tracking data. When the customer asks about their order status, shipping, tracking, or delivery, CALL a lookup tool and answer directly from the result. ${emailLine}
+You have tools to fetch real Shopify order and tracking data. When the customer asks about their order status, shipping, tracking, or delivery, CALL a lookup tool and answer directly from the result. ${emailLine}${orderLine}
 If a lookup returns no order, then (and only then) fall back to asking them to confirm their order number or email.
 If their order is lost, damaged/faulty, wrong, or they want it resent, look it up to confirm the order, then also use the duplicate_order action — looking up the data does not replace taking the action.
 GREEN-FACT MARKERS: wrap every sentence that states a fact taken from the live order data (status, tracking number/carrier, item, date, total, address) in ⟦ ⟧ delimiters — e.g. "⟦Your order #17725 is paid and currently unfulfilled.⟧". Only wrap sentences containing live order facts; leave greetings, apologies, and generic text unwrapped. Never mention these markers to the customer.`;
@@ -451,7 +464,7 @@ export async function generateReply(
   messages: ConversationMessage[],
   env: Env,
   extraInstruction?: string,
-  opts?: { shopify?: { customerEmail?: string }; collectActions?: ActionProposal[] }
+  opts?: { shopify?: { customerEmail?: string; orderNumber?: string }; collectActions?: ActionProposal[] }
 ): Promise<string> {
   const settings = await getGeminiSettings(env);
   const learnedBlock = buildLearnedGuidelinesBlock(await getLearnedGuidelines(env));
@@ -499,7 +512,7 @@ export async function generateReply(
     SYSTEM_PROMPT,
     learnedBlock,
     extraInstruction,
-    useShopify ? shopifyInstruction(opts?.shopify?.customerEmail) : "",
+    useShopify ? shopifyInstruction(opts?.shopify?.customerEmail, opts?.shopify?.orderNumber) : "",
     actionsEnabled ? actionInstruction() : "",
   ]
     .filter(Boolean)
@@ -567,7 +580,7 @@ export async function generateReply(
             },
           });
         } else {
-          const result = await runShopifyTool(env, name, fnArgs);
+          const result = await runShopifyTool(env, name, fnArgs, { orderNumber: opts?.shopify?.orderNumber });
           responseParts.push({ functionResponse: { name, response: result } });
         }
       }

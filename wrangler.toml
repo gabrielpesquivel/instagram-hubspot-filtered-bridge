@@ -61,8 +61,16 @@ SHOPIFY_API_VERSION = "2026-04"
 # - GOOGLE_CLIENT_SECRET   (Email Manager — Gmail OAuth)
 # - SHOPIFY_CLIENT_ID      (Shopify order lookup — Dev Dashboard app client ID)
 # - SHOPIFY_CLIENT_SECRET  (Shopify order lookup — client secret; exchanged for a 24h token)
-#                          NOTE: order WRITE actions (address/email/cancel/refund/
-#                          duplicate/add) need the `write_orders` scope on this app.
+#                          SCOPES required on the Shopify app:
+#                          - read_orders     : look up orders (LAST 60 DAYS ONLY)
+#                          - read_all_orders : look up orders OLDER than 60 days. Without
+#                            it, e.g. #10033 returns "not found" even though it exists —
+#                            a Shopify API limit, not a bug. Enable it on the custom app.
+#                          - write_orders    : order WRITE actions (address/email/cancel/
+#                            refund/duplicate/add).
+#                          After changing scopes, the cached KV token must refresh (it
+#                          re-exchanges within 24h; delete the shopify_access_token KV
+#                          key to force it immediately).
 # - FAL_KEY                     (fal.ai API key — SOTA gangsheet background removal,
 #                          BRIA RMBG-2.0; optional. When unset, /api/remove-bg returns
 #                          503 and the browser falls back to the local @imgly model.)
