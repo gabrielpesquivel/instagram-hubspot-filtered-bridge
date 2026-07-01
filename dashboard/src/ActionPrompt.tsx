@@ -146,26 +146,49 @@ function AddressForm({ proposal, onDone }: FormProps) {
     finally { setParsing(false); }
   }
 
-  // Pre-load the order's CURRENT shipping address so the form isn't blank — the
-  // agent edits from the real starting point instead of retyping everything.
-  async function loadCurrent(num: string) {
+  // Fetch the order's CURRENT shipping address (no state change) — reused for
+  // both the full preload and the state/country backfill below.
+  async function fetchCurrentAddress(num: string): Promise<Addr | null> {
     const clean = cleanOrder(num);
-    if (!clean) return;
-    setLoading(true);
+    if (!clean) return null;
     try {
       const r = await fetch(`/api/shopify/actions/order-items?name=${encodeURIComponent(clean)}`);
       const d = (await r.json().catch(() => ({}))) as { shippingAddress?: unknown };
-      if (r.ok && d.shippingAddress) setAddr(toAddr(d.shippingAddress));
+      if (r.ok && d.shippingAddress) return toAddr(d.shippingAddress);
     } catch { /* ignore — agent can fill manually */ }
-    finally { setLoading(false); }
+    return null;
+  }
+
+  // Pre-load the order's CURRENT shipping address so the form isn't blank — the
+  // agent edits from the real starting point instead of retyping everything.
+  async function loadCurrent(num: string) {
+    setLoading(true);
+    const cur = await fetchCurrentAddress(num);
+    if (cur) setAddr(cur);
+    setLoading(false);
   }
 
   // On open: if the AI captured the customer's requested new address, parse that;
   // otherwise pre-load the order's current address for editing.
   useEffect(() => {
     const requested = arg(proposal, "new_address");
-    if (requested) autofill(requested);
-    else if (order) loadCurrent(order);
+    if (requested) {
+      (async () => {
+        await autofill(requested);
+        // Guarantee state + country are populated: if the parse still couldn't
+        // resolve them, fall back to the order's existing values for just those
+        // two (they rarely change on an address edit). Address-specific fields
+        // (street/unit/postcode) are NOT backfilled, to avoid old data bleeding in.
+        const cur = await fetchCurrentAddress(order);
+        if (cur) setAddr((p) => ({
+          ...p,
+          province: p.province || cur.province,
+          country: p.country || cur.country,
+        }));
+      })();
+    } else if (order) {
+      loadCurrent(order);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -691,7 +691,8 @@ export async function parseAddress(text: string, env: Env): Promise<ParsedAddres
         system_instruction: { parts: [{ text:
           "Parse the shipping address into JSON with keys: firstName, lastName, company, address1, address2, city, province, zip, country. " +
           "address1 = street number + name; address2 = unit/apt/suite if any; province = state/region/county; zip = postal/zip code; country = full country name. " +
-          "Use the recipient name for firstName/lastName if present. Omit keys you can't determine. Reply with ONLY the JSON object." }] },
+          "ALWAYS provide province/state AND country. If the customer did not write them explicitly, INFER them from the city and postal/zip code using your geographic knowledge — e.g. 'Melbourne 3000' -> province 'Victoria', country 'Australia'; 'Manchester M1 2AB' -> country 'United Kingdom'; 'Toronto M5V 2T6' -> province 'Ontario', country 'Canada'; 'Brooklyn NY 11201' -> province 'New York', country 'United States'. Only leave province blank if the country genuinely has no states/regions (e.g. Singapore, Monaco). Never leave country blank when the city or postcode makes it identifiable. " +
+          "Use the recipient name for firstName/lastName if present. Omit only the other keys you truly can't determine. Reply with ONLY the JSON object." }] },
         contents: [{ role: "user", parts: [{ text }] }],
         generationConfig: { maxOutputTokens: 400, temperature: 0, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } },
       }),
