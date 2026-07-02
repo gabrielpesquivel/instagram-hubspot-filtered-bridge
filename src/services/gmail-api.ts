@@ -281,7 +281,9 @@ function b64url(bytes: Uint8Array): string {
 function encodeHeader(value: string): string {
   if (/^[\x00-\x7F]*$/.test(value)) return value;
   const bytes = new TextEncoder().encode(value);
-  return `=?UTF-8?B?${b64url(bytes).replace(/-/g, "+").replace(/_/g, "/")}=?=`;
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return `=?UTF-8?B?${btoa(bin)}?=`;
 }
 
 export interface SendReplyArgs {

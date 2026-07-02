@@ -57,23 +57,24 @@ export async function handleUploadFile(request: Request, env: Env): Promise<Resp
     return jsonResponse({ error: "Empty body" }, 400);
   }
 
-  const lenHeader = request.headers.get("Content-Length");
-  if (lenHeader && Number(lenHeader) > MAX_BYTES) {
+  // Stream straight to R2 — buffering a 200 MB body would exceed the Worker's
+  // 128 MB memory limit. R2 needs a known length, so require Content-Length
+  // (browsers set it automatically for File/Blob bodies).
+  const size = Number(request.headers.get("Content-Length"));
+  if (!Number.isFinite(size) || size <= 0) {
+    return jsonResponse({ error: "Missing Content-Length" }, 411);
+  }
+  if (size > MAX_BYTES) {
     return jsonResponse({ error: "File too large (max 200 MB)" }, 413);
   }
 
-  const buf = await request.arrayBuffer();
-  if (buf.byteLength > MAX_BYTES) {
-    return jsonResponse({ error: "File too large (max 200 MB)" }, 413);
-  }
-
-  await env.GANGSHEET_FILES.put(keyFor(date, name), buf, {
+  await env.GANGSHEET_FILES.put(keyFor(date, name), request.body, {
     httpMetadata: {
       contentType: request.headers.get("Content-Type") || "application/octet-stream",
     },
   });
 
-  return jsonResponse({ ok: true, name, size: buf.byteLength });
+  return jsonResponse({ ok: true, name, size });
 }
 
 // GET /api/files/get?key=gangsheets/<date>/<name>  → stream the file for download/view

@@ -44,3 +44,7 @@ export async function removePendingBySender(
 export async function clearPendingMessages(env: Env): Promise<number> {
   return getDMState(env).clearPending();
 }
+
+export async function drainPendingMessages(env: Env): Promise<PendingMessage[]> {
+  return getDMState(env).drainPending();
+}

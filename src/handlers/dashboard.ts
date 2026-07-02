@@ -3,7 +3,7 @@ import { getAllStats, getRecentLogs, incrementStat, appendLog } from "../service
 import { getConsoleLogs } from "../services/logger";
 import { getConnection } from "../services/facebook-oauth";
 import { getCookie, isAuthenticated, jsonResponse } from "../utils/auth";
-import { getPendingMessages, removePendingMessage, removePendingBySender, clearPendingMessages } from "../services/pending";
+import { getPendingMessages, removePendingMessage, removePendingBySender, clearPendingMessages, drainPendingMessages } from "../services/pending";
 import { sendMessage } from "../services/instagram-api";
 import { getBlocklist, addToBlocklist, removeFromBlocklist } from "../services/blocklist";
 import { addMessageToConversation, setConversationLanguage } from "../services/conversations";
@@ -300,7 +300,9 @@ export async function handleApproveAllPending(
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
 
-  const messages = await getPendingMessages(env);
+  // Drain atomically up front — the translate loop below is slow, and a
+  // trailing clear would silently delete messages that arrived meanwhile.
+  const messages = await drainPendingMessages(env);
   if (messages.length === 0) {
     return jsonResponse({ ok: true, forwarded: 0 });
   }
@@ -349,9 +351,6 @@ export async function handleApproveAllPending(
       await setConversationLanguage(senderId, detectedLang, env);
     }
   }
-
-  // Clear pending queue
-  await clearPendingMessages(env);
 
   return jsonResponse({ ok: true, forwarded: totalForwarded });
 }

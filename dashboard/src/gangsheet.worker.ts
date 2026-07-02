@@ -116,7 +116,9 @@ async function generate(name: string, csv: ArrayBuffer) {
       name,
       pdf: pdf.buffer,
       count: collect.count,
-      errors: collect.errors,
+      // Collect-time errors + items whose artwork failed at render time —
+      // both end up as fluro-yellow tags on the sheet.
+      errors: collect.errors + (render.render_failures || 0),
       widthMm: render.width_mm,
       heightMm: render.height_mm,
     },

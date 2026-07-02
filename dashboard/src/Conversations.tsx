@@ -47,6 +47,10 @@ export function Conversations({ fullPage = false }: { fullPage?: boolean } = {})
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const sendingRef = useRef(sending);
+  sendingRef.current = sending;
 
   async function fetchConversations() {
     try {
@@ -58,8 +62,12 @@ export function Conversations({ fullPage = false }: { fullPage?: boolean } = {})
   async function fetchMessages(senderId: string) {
     try {
       const res = await fetch(`/api/conversations/${encodeURIComponent(senderId)}`);
-      if (res.ok) {
+      // A slow response for a previously selected thread must not overwrite
+      // the current one, and a poll landing mid-send would clobber the
+      // optimistic bubble — drop the response in both cases.
+      if (res.ok && selectedRef.current === senderId && !sendingRef.current) {
         const data: ConversationFull = await res.json();
+        if (selectedRef.current !== senderId || sendingRef.current) return;
         setMessages(data.messages);
         setSelectedUsername(data.senderUsername);
         setSelectedLanguage(data.language ?? "");
@@ -68,7 +76,7 @@ export function Conversations({ fullPage = false }: { fullPage?: boolean } = {})
       }
     } catch { /* ignore */ }
     finally {
-      setLoadingMessages(false);
+      if (selectedRef.current === senderId) setLoadingMessages(false);
     }
   }
 
@@ -104,8 +112,12 @@ export function Conversations({ fullPage = false }: { fullPage?: boolean } = {})
       if (!res.ok) {
         const body = await res.json().catch(() => ({} as { failed?: boolean; error?: string }));
         if (body.failed) {
-          // Stored server-side as failed — refetch to show the retry button
+          // Stored server-side as failed — refetch to show the retry button.
+          // Clear the sending flag first so the refetch isn't dropped by the
+          // mid-send guard in fetchMessages.
           toast("Send failed — saved with a retry button");
+          sendingRef.current = false;
+          setSending(false);
           fetchMessages(selected);
         } else {
           setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));

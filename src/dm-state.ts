@@ -179,6 +179,17 @@ export class DMState extends DurableObject<Env> {
     return list.length;
   }
 
+  /** Atomic snapshot-and-clear: callers that process the queue slowly (e.g.
+   *  approve-all with per-message translation) must drain first so messages
+   *  arriving mid-processing aren't wiped by a later clear. */
+  async drainPending(): Promise<PendingMessage[]> {
+    await this.ensureMigrated();
+    const list = ((await this.ctx.storage.get("pending")) as PendingMessage[]) || [];
+    await this.ctx.storage.put("pending", []);
+    if (list.length > 0) this.broadcast("pending");
+    return list;
+  }
+
   // ---------- conversations ----------
 
   private async getIndex(): Promise<ConversationSummary[]> {

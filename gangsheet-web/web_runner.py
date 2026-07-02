@@ -221,12 +221,16 @@ def render(name):
 
     out_path = f'/tmp/{name}_gangsheet.pdf'
     c = pdf_utils.setup_canvas(out_path, (config.PAGE_WIDTH, sheet_height))
+    render_failures = 0
     for x, y, page, item in placed_items:
-        gangsheet_main.render_item(c, x, y, item, draw_cutting_border=True)
+        if not gangsheet_main.render_item(c, x, y, item, draw_cutting_border=True):
+            render_failures += 1
     c.save()
 
     return json.dumps({
         'pdf_path': out_path,
         'width_mm': round(config.PAGE_WIDTH / config.MM_TO_PTS),
         'height_mm': round(sheet_height / config.MM_TO_PTS),
+        # Items whose artwork failed to draw (fluro-yellow tag substituted)
+        'render_failures': render_failures,
     })

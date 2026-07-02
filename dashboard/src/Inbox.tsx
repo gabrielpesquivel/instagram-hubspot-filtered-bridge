@@ -338,13 +338,21 @@ export function Inbox() {
 
   // ── Thread loading ──────────────────────────────────────────────────────
   async function loadThread(sel: Selected, silent = false) {
+    // Selecting thread A then B quickly can let A's slower response land last
+    // and overwrite B's messages/title/orders — drop any response that no
+    // longer matches the current selection.
+    const isCurrent = () => {
+      const cur = selectedRef.current;
+      return !!cur && cur.channel === sel.channel && cur.id === sel.id;
+    };
     if (!silent) setLoadingThread(true);
     try {
       if (sel.channel === "instagram" && sel.source === "pull") {
         // Live thread straight from the Graph API (no stored conversation yet).
         const res = await fetch(`/api/instagram/threads/${encodeURIComponent(sel.conversationId || "")}`);
-        if (res.ok) {
+        if (res.ok && isCurrent()) {
           const data = await res.json();
+          if (!isCurrent()) return;
           setIgMessages(
             (data.messages || []).map((m: { fromUs: boolean; text: string; date: string }, i: number) => ({
               id: "ig-" + i,
@@ -361,8 +369,9 @@ export function Inbox() {
         }
       } else if (sel.channel === "instagram") {
         const res = await fetch(`/api/conversations/${encodeURIComponent(sel.id)}`);
-        if (res.ok) {
+        if (res.ok && isCurrent()) {
           const data = await res.json();
+          if (!isCurrent()) return;
           setIgMessages(data.messages || []);
           setThreadTitle("@" + data.senderUsername);
           setThreadLang(data.language ?? "");
@@ -372,8 +381,9 @@ export function Inbox() {
         }
       } else {
         const res = await fetch(`/api/email/threads/${encodeURIComponent(sel.id)}`);
-        if (res.ok) {
+        if (res.ok && isCurrent()) {
           const data = await res.json();
+          if (!isCurrent()) return;
           setEmailMessages(data.messages || []);
           setThreadSubject(data.subject || "");
           const lastCustomer = [...(data.messages || [])].reverse().find((m: EmailMessage) => !m.fromUs);
@@ -394,7 +404,8 @@ export function Inbox() {
       }
     } catch { /* ignore */ }
     finally {
-      if (!silent) setLoadingThread(false);
+      // A stale load must not clear the spinner the newer load turned on.
+      if (!silent && isCurrent()) setLoadingThread(false);
     }
   }
 
