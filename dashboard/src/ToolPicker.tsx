@@ -1,3 +1,4 @@
+import { DigestCard } from "./DigestCard";
 import { FileCalendar } from "./FileCalendar";
 import { TodoList } from "./TodoList";
 import { ThemeToggle } from "./ThemeToggle";
@@ -37,8 +38,9 @@ export function ToolPicker({ onSelect, onLogout }: ToolPickerProps) {
           <FileCalendar />
         </section>
 
-        {/* Right: daily to-do checklist */}
+        {/* Right: daily digest + to-do checklist */}
         <section style={styles.right}>
+          <DigestCard />
           <TodoList />
         </section>
       </div>

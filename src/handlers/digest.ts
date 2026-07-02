@@ -13,9 +13,19 @@ function aestDate(now = new Date()): string {
   return new Date(now.getTime() + 10 * 3600_000).toISOString().slice(0, 10);
 }
 
+// The digest fans out to Gmail + Instagram Graph + R2 — a couple of seconds
+// cold. Cache the built payload briefly so page loads (home + dashboard, plus
+// the 5-min widget refresh) don't each pay that.
+const CACHE_KEY = "digest_cache";
+const CACHE_TTL = 60; // seconds — KV minimum
+
 export async function handleDigest(request: Request, env: Env): Promise<Response> {
   if (!(await isAuthenticated(request, env))) {
     return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+  const cached = await env.PROFILE_CACHE.get(CACHE_KEY);
+  if (cached) {
+    return new Response(cached, { headers: { "Content-Type": "application/json" } });
   }
   const date = aestDate();
   const state = getDMState(env);
@@ -48,7 +58,7 @@ export async function handleDigest(request: Request, env: Env): Promise<Response
       .catch(() => null),
   ]);
 
-  return jsonResponse({
+  const payload = JSON.stringify({
     date,
     // Message flow today (DO daily counters)
     stats: stats
@@ -65,4 +75,6 @@ export async function handleDigest(request: Request, env: Env): Promise<Response
     dailyOrders,             // this morning's Shopify pull (null = not run)
     sheetsUploaded: sheetsToday, // files stored for today in the File Calendar
   });
+  await env.PROFILE_CACHE.put(CACHE_KEY, payload, { expirationTtl: CACHE_TTL });
+  return new Response(payload, { headers: { "Content-Type": "application/json" } });
 }

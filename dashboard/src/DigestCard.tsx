@@ -10,8 +10,6 @@ interface DigestData {
   pendingQueue: number | null;
   emailUnread: number | null;
   igUnread: number | null;
-  dailyOrders: { orders: number; items: number; pulledAt: string } | null;
-  sheetsUploaded: number | null;
 }
 
 const fmt = (n: number | null | undefined) => (n === null || n === undefined ? "—" : String(n));
@@ -36,35 +34,25 @@ export function DigestCard() {
     };
   }, []);
 
-  if (!data) return null;
-
-  const needsAttention =
-    (data.pendingQueue || 0) + (data.emailUnread || 0) + (data.igUnread || 0);
+  // Render the card shell immediately with "—" placeholders — a card that pops
+  // in after the fetch makes the whole page jump.
+  const loading = data === null;
+  const needsAttention = data
+    ? (data.pendingQueue || 0) + (data.emailUnread || 0) + (data.igUnread || 0)
+    : null;
 
   return (
     <div style={styles.card}>
       <div style={styles.header}>
         <span style={styles.title}>Daily digest</span>
-        <span style={styles.date}>{data.date}</span>
+        <span style={styles.date}>{data?.date || " "}</span>
       </div>
 
-      <div style={styles.row}>
-        <Item label="Awaiting approval" value={fmt(data.pendingQueue)} hot={(data.pendingQueue || 0) > 0} />
-        <Item label="Unread emails" value={fmt(data.emailUnread)} hot={(data.emailUnread || 0) > 0} />
-        <Item label="Unread DMs" value={fmt(data.igUnread)} hot={(data.igUnread || 0) > 0} />
-        <Item label="Replied today" value={fmt(data.stats?.replied ?? null)} />
-      </div>
-
-      <div style={styles.orders}>
-        {data.dailyOrders ? (
-          <>
-            <strong>{data.dailyOrders.orders}</strong> orders ({data.dailyOrders.items} items) pulled from
-            Shopify — <a href="#/gangsheet" style={styles.link}>generate gangsheet</a>
-            {data.sheetsUploaded ? ` · ${data.sheetsUploaded} sheet file(s) stored today` : ""}
-          </>
-        ) : (
-          <>No Shopify pull stored for today yet (runs ~9am AEST)</>
-        )}
+      <div style={{ ...styles.row, opacity: loading ? 0.5 : 1 }}>
+        <Item label="Awaiting approval" value={fmt(data?.pendingQueue ?? null)} hot={(data?.pendingQueue || 0) > 0} />
+        <Item label="Unread emails" value={fmt(data?.emailUnread ?? null)} hot={(data?.emailUnread || 0) > 0} />
+        <Item label="Unread DMs" value={fmt(data?.igUnread ?? null)} hot={(data?.igUnread || 0) > 0} />
+        <Item label="Replied today" value={fmt(data?.stats?.replied ?? null)} />
       </div>
 
       {needsAttention === 0 && (
@@ -83,13 +71,16 @@ function Item({ label, value, hot }: { label: string; value: string; hot?: boole
   );
 }
 
+// Matches the home page sections (TodoList/FileCalendar): h2 title + muted
+// sub outside, content in a var(--surface) card with the shared border/shadow.
 const styles: Record<string, CSSProperties> = {
   card: {
-    background: "var(--card-bg, #fff)",
-    border: "1px solid var(--border, #e0e0e0)",
-    borderRadius: 8,
+    background: "var(--surface)",
+    border: "1px solid var(--border)",
+    borderRadius: "8px",
+    boxShadow: "0 2px 8px var(--shadow)",
     padding: "1rem",
-    marginBottom: "1rem",
+    marginBottom: "1.5rem",
   },
   header: {
     display: "flex",
@@ -97,8 +88,8 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "baseline",
     marginBottom: "0.75rem",
   },
-  title: { fontWeight: 700, fontSize: "1rem" },
-  date: { fontSize: "0.8rem", opacity: 0.6 },
+  title: { margin: 0, fontSize: "1.25rem", color: "var(--text)", fontWeight: 700 },
+  date: { fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 600 },
   row: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
@@ -106,9 +97,7 @@ const styles: Record<string, CSSProperties> = {
     marginBottom: "0.75rem",
   },
   item: { textAlign: "center" },
-  itemValue: { fontSize: "1.4rem", fontWeight: 700 },
-  itemLabel: { fontSize: "0.72rem", opacity: 0.65 },
-  orders: { fontSize: "0.85rem", opacity: 0.9 },
-  link: { color: "#2e7d32", fontWeight: 600 },
+  itemValue: { fontSize: "1.4rem", fontWeight: 700, color: "var(--text)" },
+  itemLabel: { fontSize: "0.72rem", color: "var(--text-muted)" },
   allClear: { marginTop: "0.5rem", fontSize: "0.85rem", color: "#2e7d32" },
 };
