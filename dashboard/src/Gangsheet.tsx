@@ -445,12 +445,11 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
     if (pulling) return;
     setPulling(true);
     try {
+      // datetime-local values are local time — toISOString converts to the UTC
+      // the Shopify query expects. Range is [from, to).
       const params = new URLSearchParams();
-      if (pullFrom) params.set("from", new Date(`${pullFrom}T00:00:00`).toISOString());
-      if (pullTo) {
-        // Inclusive end date — the API range is [from, to)
-        params.set("to", new Date(new Date(`${pullTo}T00:00:00`).getTime() + 86_400_000).toISOString());
-      }
+      if (pullFrom) params.set("from", new Date(pullFrom).toISOString());
+      if (pullTo) params.set("to", new Date(pullTo).toISOString());
       const res = await fetch(`/api/gangsheet/orders?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) {
@@ -552,9 +551,9 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={styles.jobName}>Pull orders from Shopify</div>
               <div style={{ ...styles.jobDetail, display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                <input type="date" value={pullFrom} onChange={(e) => setPullFrom(e.target.value)} style={dateInputStyle} />
+                <input type="datetime-local" value={pullFrom} onChange={(e) => setPullFrom(e.target.value)} style={dateInputStyle} />
                 <span>to</span>
-                <input type="date" value={pullTo} onChange={(e) => setPullTo(e.target.value)} style={dateInputStyle} />
+                <input type="datetime-local" value={pullTo} onChange={(e) => setPullTo(e.target.value)} style={dateInputStyle} />
                 <span style={{ opacity: 0.7 }}>(blank = last 24 hours)</span>
               </div>
             </div>
