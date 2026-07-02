@@ -1,6 +1,6 @@
 import type { Env } from "./types";
 import { DMState, getDMState } from "./dm-state";
-import { isAuthenticated } from "./utils/auth";
+import { isAuthenticated, jsonResponse } from "./utils/auth";
 import { refreshMetaTokenIfNeeded } from "./services/facebook-oauth";
 import { handleVerification, handleWebhook } from "./handlers/instagram";
 import {
@@ -367,6 +367,15 @@ export default {
     }
     if (path === "/api/gangsheet/daily" && request.method === "GET") {
       return handleGetDailyOrders(request, env);
+    }
+    // Manual re-run of the automatic render (e.g. after a failed cron). Uses
+    // the already-stored daily pull; result appears under /api/files for today.
+    if (path === "/api/gangsheet/render" && request.method === "POST") {
+      if (!(await isAuthenticated(request, env))) {
+        return jsonResponse({ error: "Unauthorized" }, 401);
+      }
+      ctx.waitUntil(renderDailyGangsheet(env));
+      return jsonResponse({ ok: true, started: true });
     }
 
     // Daily digest (dashboard widget)
