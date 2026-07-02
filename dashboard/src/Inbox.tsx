@@ -397,6 +397,14 @@ export function Inbox() {
             setOrdersOpen(true);
             lookupOrders(custEmail);
           }
+          // Prefill the composer with the cron-generated auto-draft (initial
+          // open only — a silent refresh must not clobber typing in progress).
+          if (!silent && data.autoDraft?.suggestion) {
+            const raw: string = data.autoDraft.suggestion;
+            setEditorContent(raw, raw.includes("⟦"));
+            setAiSuggestion(stripGreenMarkers(raw));
+            if (data.autoDraft.actions?.length) showActions(data.autoDraft.actions);
+          }
           setThreadLang("");
           setAutoReply(false);
           setWindowExpired(false);

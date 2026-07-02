@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type DragEvent } from "react";
 import { ThemeToggle } from "./ThemeToggle";
 
 interface SheetJob {
@@ -257,6 +257,26 @@ function triggerDownload(url: string, filename: string) {
 
 let nextJobId = 1;
 
+const pullBtnStyle: CSSProperties = {
+  padding: "0.45rem 0.9rem",
+  borderRadius: 6,
+  border: "1px solid #2e7d32",
+  background: "#2e7d32",
+  color: "#fff",
+  cursor: "pointer",
+  fontSize: "0.85rem",
+  whiteSpace: "nowrap",
+};
+
+const dateInputStyle: CSSProperties = {
+  padding: "0.25rem 0.4rem",
+  borderRadius: 4,
+  border: "1px solid var(--border, #ccc)",
+  background: "var(--bg, #fff)",
+  color: "inherit",
+  fontSize: "0.85rem",
+};
+
 export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
   const workerRef = useRef<Worker | null>(null);
   const queueRef = useRef<{ job: SheetJob; csv: ArrayBuffer }[]>([]);
@@ -267,6 +287,19 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
   const [jobs, setJobs] = useState<SheetJob[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [dragOver, setDragOver] = useState(false);
+
+  // Shopify order pull (replaces the manual Matrixify CSV export). `daily` is
+  // the cron-stored 9am snapshot; the manual pull fetches an arbitrary range.
+  const [daily, setDaily] = useState<{
+    date: string;
+    orders: number;
+    items: number;
+    csv: string;
+    pulledAt: string;
+  } | null>(null);
+  const [pulling, setPulling] = useState(false);
+  const [pullFrom, setPullFrom] = useState("");
+  const [pullTo, setPullTo] = useState("");
 
   function updateJob(id: number, patch: Partial<SheetJob>) {
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
@@ -384,6 +417,59 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    fetch("/api/gangsheet/daily")
+      .then(async (r) => {
+        if (r.ok) setDaily(await r.json());
+      })
+      .catch(() => { /* no stored pull — banner just doesn't show */ });
+  }, []);
+
+  /** Queue a CSV that arrived as text (Shopify pull) instead of a dropped file. */
+  function enqueueCsv(name: string, csvText: string, fileName: string) {
+    const clean = name.replace(/[^A-Za-z0-9._-]/g, "_") || "sheet";
+    const job: SheetJob = {
+      id: nextJobId++,
+      name: clean,
+      fileName,
+      status: "queued",
+      detail: "Waiting…",
+    };
+    const csv = new TextEncoder().encode(csvText).buffer as ArrayBuffer;
+    setJobs((prev) => [...prev, job]);
+    queueRef.current.push({ job, csv });
+    pumpQueue();
+  }
+
+  async function handlePull() {
+    if (pulling) return;
+    setPulling(true);
+    try {
+      const params = new URLSearchParams();
+      if (pullFrom) params.set("from", new Date(`${pullFrom}T00:00:00`).toISOString());
+      if (pullTo) {
+        // Inclusive end date — the API range is [from, to)
+        params.set("to", new Date(new Date(`${pullTo}T00:00:00`).getTime() + 86_400_000).toISOString());
+      }
+      const res = await fetch(`/api/gangsheet/orders?${params.toString()}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setLogs((prev) => [...prev, `Shopify pull failed: ${data.error || res.status}`]);
+        return;
+      }
+      if (!data.items) {
+        setLogs((prev) => [...prev, `Shopify pull: ${data.orders} orders, no printable items in range`]);
+        return;
+      }
+      const label = pullFrom || pullTo ? `Orders_${pullFrom || "start"}_${pullTo || "now"}` : "Orders_last24h";
+      enqueueCsv(label, data.csv, `Shopify pull — ${data.orders} orders, ${data.items} items`);
+    } catch {
+      setLogs((prev) => [...prev, "Shopify pull failed: network error"]);
+    } finally {
+      setPulling(false);
+    }
+  }
+
   async function addFiles(files: FileList | File[]) {
     for (const file of Array.from(files)) {
       if (!file.name.toLowerCase().endsWith(".csv")) continue;
@@ -441,6 +527,45 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
             }}
           />
           <span style={styles.statusText}>{runtimeStatus}</span>
+        </div>
+
+        <div style={styles.jobList}>
+          {daily && (
+            <div style={styles.jobRow}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={styles.jobName}>Today's Shopify orders — {daily.date}</div>
+                <div style={styles.jobDetail}>
+                  {daily.orders} orders, {daily.items} line items (pulled{" "}
+                  {new Date(daily.pulledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})
+                </div>
+              </div>
+              <button
+                disabled={!ready || daily.items === 0}
+                onClick={() => enqueueCsv(`Orders_${daily.date}`, daily.csv, `Daily orders ${daily.date}`)}
+                style={{ ...pullBtnStyle, opacity: ready && daily.items > 0 ? 1 : 0.5 }}
+              >
+                Generate sheet
+              </button>
+            </div>
+          )}
+          <div style={styles.jobRow}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={styles.jobName}>Pull orders from Shopify</div>
+              <div style={{ ...styles.jobDetail, display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                <input type="date" value={pullFrom} onChange={(e) => setPullFrom(e.target.value)} style={dateInputStyle} />
+                <span>to</span>
+                <input type="date" value={pullTo} onChange={(e) => setPullTo(e.target.value)} style={dateInputStyle} />
+                <span style={{ opacity: 0.7 }}>(blank = last 24 hours)</span>
+              </div>
+            </div>
+            <button
+              disabled={pulling || !ready}
+              onClick={handlePull}
+              style={{ ...pullBtnStyle, opacity: pulling || !ready ? 0.5 : 1 }}
+            >
+              {pulling ? "Pulling…" : "Pull orders"}
+            </button>
+          </div>
         </div>
 
         <label

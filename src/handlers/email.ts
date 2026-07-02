@@ -21,6 +21,7 @@ import {
   getSendAsSignature,
   getAttachment,
 } from "../services/gmail-api";
+import { getStoredDraft, clearStoredDraft } from "./email-autodraft";
 
 /** Initiate Google OAuth — validate session, then redirect to Google consent. */
 export async function handleGoogleAuthInit(request: Request, env: Env): Promise<Response> {
@@ -110,20 +111,25 @@ export async function handleGetEmailThreads(request: Request, env: Env): Promise
   }
 }
 
-/** Fetch one thread and return an AI-suggested reply (same engine as DMs). */
-export async function handleSuggestEmailReply(
-  request: Request,
-  env: Env,
-  threadId: string
-): Promise<Response> {
-  if (!(await isAuthenticated(request, env))) return jsonResponse({ error: "Unauthorized" }, 401);
-  const conn = await getGoogleConnection(env);
-  const token = await getValidGoogleToken(env);
-  if (!conn || !token) return jsonResponse({ error: "Gmail not connected" }, 409);
+export interface EmailSuggestion {
+  suggestion: string;
+  subject: string;
+  actions: ActionProposal[];
+}
 
-  try {
-    const detail = await getThreadDetail(token, threadId, conn.email);
-    if (!detail) return jsonResponse({ error: "Thread not found" }, 404);
+/** Build an AI-suggested reply for a thread (same engine as DMs). Shared by
+ *  the on-demand suggest endpoint and the auto-draft cron sweep. Returns null
+ *  when the thread doesn't exist or has no customer message to answer;
+ *  throws on Gmail/Gemini errors. */
+export async function buildEmailSuggestion(
+  env: Env,
+  token: string,
+  connEmail: string,
+  threadId: string
+): Promise<EmailSuggestion | null> {
+  {
+    const detail = await getThreadDetail(token, threadId, connEmail);
+    if (!detail) return null;
 
     const labels = await getImageLabels(env, threadId);
 
@@ -157,7 +163,7 @@ export async function handleSuggestEmailReply(
       });
     }
     if (!messages.some((m) => m.sender === "user")) {
-      return jsonResponse({ error: "No customer message to reply to" }, 400);
+      return null;
     }
 
     const firstCustomer = detail.messages.find((m) => !m.fromUs);
@@ -198,7 +204,25 @@ WEBSITE REFERENCE (email only): When pointing the customer to our website, say "
       shopify: { customerEmail, orderNumber: orderNumber || undefined },
       collectActions: actions,
     });
-    return jsonResponse({ suggestion, subject: detail.subject, actions });
+    return { suggestion, subject: detail.subject, actions };
+  }
+}
+
+/** Fetch one thread and return an AI-suggested reply (same engine as DMs). */
+export async function handleSuggestEmailReply(
+  request: Request,
+  env: Env,
+  threadId: string
+): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) return jsonResponse({ error: "Unauthorized" }, 401);
+  const conn = await getGoogleConnection(env);
+  const token = await getValidGoogleToken(env);
+  if (!conn || !token) return jsonResponse({ error: "Gmail not connected" }, 409);
+
+  try {
+    const result = await buildEmailSuggestion(env, token, conn.email, threadId);
+    if (!result) return jsonResponse({ error: "Thread not found or no customer message to reply to" }, 404);
+    return jsonResponse(result);
   } catch (error) {
     await cerr(env, "Suggest email reply error:", error);
     return jsonResponse({ error: "Failed to generate suggestion" }, 500);
@@ -281,10 +305,14 @@ export async function handleGetEmailThread(
     const detail = await getThreadDetail(token, threadId, conn.email);
     if (!detail) return jsonResponse({ error: "Thread not found" }, 404);
     const labels = await getImageLabels(env, threadId);
+    // Include the cron-generated draft (if any) so the composer can prefill
+    // without a round-trip to Gemini.
+    const autoDraft = await getStoredDraft(env, threadId);
     return jsonResponse({
       threadId,
       subject: detail.subject,
       replyTo: detail.replyTo,
+      ...(autoDraft ? { autoDraft: { suggestion: autoDraft.suggestion, actions: autoDraft.actions, draftedAt: autoDraft.draftedAt } } : {}),
       messages: detail.messages.map((m) => ({
         fromUs: m.fromUs,
         fromName: firstNameFrom(m.from),
@@ -403,8 +431,10 @@ export async function handleSendEmailReply(
       );
     }
 
-    // Best-effort: clear the unread flag so it drops out of the queue.
+    // Best-effort: clear the unread flag so it drops out of the queue, and
+    // drop the stored auto-draft so a reopened thread doesn't prefill stale text.
     await markThreadRead(token, threadId).catch(() => {});
+    await clearStoredDraft(env, threadId).catch(() => {});
     return jsonResponse({ ok: true, messageId, amendment });
   } catch (error) {
     await cerr(env, "Send email reply error:", error);

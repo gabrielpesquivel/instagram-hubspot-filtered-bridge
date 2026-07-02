@@ -76,6 +76,13 @@ import {
   handleSearchVariants,
 } from "./handlers/shopify-actions";
 import {
+  handlePullOrders,
+  handleGetDailyOrders,
+  storeDailyOrders,
+} from "./handlers/gangsheet-orders";
+import { handleDigest } from "./handlers/digest";
+import { autoDraftEmails } from "./handlers/email-autodraft";
+import {
   handleGoogleAuthInit,
   handleGoogleCallback,
   handleGetEmailConnection,
@@ -353,6 +360,19 @@ export default {
       return handleRemoveBackground(request, env);
     }
 
+    // Gangsheet order pull (replaces the Matrixify CSV export)
+    if (path === "/api/gangsheet/orders" && request.method === "GET") {
+      return handlePullOrders(request, env);
+    }
+    if (path === "/api/gangsheet/daily" && request.method === "GET") {
+      return handleGetDailyOrders(request, env);
+    }
+
+    // Daily digest (dashboard widget)
+    if (path === "/api/digest" && request.method === "GET") {
+      return handleDigest(request, env);
+    }
+
     // Daily gangsheet file uploads (R2)
     if (path === "/api/files/get" && request.method === "GET") {
       return handleGetFile(request, env);
@@ -390,8 +410,21 @@ export default {
     return env.ASSETS.fetch(request);
   },
 
-  // Daily cron: renew the Meta long-lived token before it expires
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(refreshMetaTokenIfNeeded(env));
+  // Crons (see wrangler.toml [triggers]):
+  //  - 03:00 UTC  daily Meta token refresh
+  //  - 23:00 UTC  (~9am AEST) Shopify order pull for the gangsheet
+  //  - */10       pre-draft AI replies for new unread emails
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    switch (event.cron) {
+      case "0 3 * * *":
+        ctx.waitUntil(refreshMetaTokenIfNeeded(env));
+        break;
+      case "0 23 * * *":
+        ctx.waitUntil(storeDailyOrders(env));
+        break;
+      case "*/10 * * * *":
+        ctx.waitUntil(autoDraftEmails(env));
+        break;
+    }
   },
 };

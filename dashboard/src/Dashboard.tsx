@@ -3,6 +3,7 @@ import { MetaConnection } from "./MetaConnection";
 import { FilterSettings } from "./FilterSettings";
 import { WebhookSubscriptions } from "./WebhookSubscriptions";
 import { AgentSettings } from "./AgentSettings";
+import { DigestCard } from "./DigestCard";
 import { Toaster, toast } from "./toast";
 
 interface Stats {
@@ -427,6 +428,7 @@ export function Dashboard({ onLogout, onBack }: { onLogout: () => void; onBack?:
 
         {/* Right column — monitoring */}
         <div style={styles.rightCol}>
+          <DigestCard />
           {stats && (
             <div style={styles.grid}>
               <StatCard

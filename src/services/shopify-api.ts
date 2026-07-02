@@ -220,6 +220,80 @@ export async function findOrdersByEmail(
   );
 }
 
+// ── Gangsheet order pull ──────────────────────────────────────────────────────
+// Replaces the daily Matrixify CSV export: fetch orders created in a window and
+// shape them into the exact rows the gangsheet generator's CSV parser expects.
+
+export interface GangsheetLineRow {
+  orderNumber: string;      // "12646" (no #)
+  lineName: string;         // "Initials - CUSTOM INITIALS / BLACK"
+  variantTitle: string;
+  quantity: number;         // currentQuantity — refunds/removals already deducted
+  properties: string;       // newline-joined "key: value" pairs, values \:-escaped
+}
+
+const GANGSHEET_ORDERS_QUERY = `query($q: String!, $n: Int!, $cursor: String) {
+  orders(first: $n, after: $cursor, query: $q, sortKey: CREATED_AT) {
+    pageInfo { hasNextPage endCursor }
+    edges { node {
+      name cancelledAt
+      lineItems(first: 100) { edges { node {
+        name variantTitle currentQuantity
+        customAttributes { key value }
+      } } }
+    } }
+  }
+}`;
+
+/** All printable line rows for orders created in [from, to). Skips cancelled
+ *  orders; uses currentQuantity so refunded/removed items are already deducted
+ *  (the Admin API gives us the clean number the CSV export never had). Throws
+ *  on API errors — the caller needs to distinguish "no orders" from "failed". */
+export async function fetchGangsheetRows(
+  env: Env,
+  fromISO: string,
+  toISO: string
+): Promise<{ rows: GangsheetLineRow[]; orderCount: number }> {
+  type Node = {
+    name: string;
+    cancelledAt: string | null;
+    lineItems: { edges: { node: {
+      name: string; variantTitle: string | null; currentQuantity: number;
+      customAttributes: { key: string; value: string | null }[];
+    } }[] };
+  };
+  const q = `created_at:>='${fromISO}' created_at:<'${toISO}'`;
+  const rows: GangsheetLineRow[] = [];
+  let orderCount = 0;
+  let cursor: string | null = null;
+  // 20 pages × 50 = 1000 orders — far above any real day; guards a runaway loop.
+  for (let page = 0; page < 20; page++) {
+    const data: {
+      orders: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; edges: { node: Node }[] };
+    } = await adminGraphQL(env, GANGSHEET_ORDERS_QUERY, { q, n: 50, cursor });
+    for (const { node } of data.orders.edges) {
+      if (node.cancelledAt) continue;
+      orderCount++;
+      for (const { node: li } of node.lineItems.edges) {
+        if (li.currentQuantity <= 0) continue; // fully refunded/removed
+        const properties = li.customAttributes
+          .map((a) => `${a.key}: ${(a.value || "").replace(/:/g, "\\:")}`)
+          .join("\n");
+        rows.push({
+          orderNumber: node.name.replace(/^#/, ""),
+          lineName: li.name,
+          variantTitle: li.variantTitle && li.variantTitle !== "Default Title" ? li.variantTitle : "",
+          quantity: li.currentQuantity,
+          properties,
+        });
+      }
+    }
+    if (!data.orders.pageInfo.hasNextPage) break;
+    cursor = data.orders.pageInfo.endCursor;
+  }
+  return { rows, orderCount };
+}
+
 // ── Writes ───────────────────────────────────────────────────────────────────
 // Mutations behind the agent-confirmed order actions. Unlike the read path these
 // THROW on failure (with a useful message) so the handler can report it to the
