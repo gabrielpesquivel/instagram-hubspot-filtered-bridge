@@ -255,6 +255,41 @@ function triggerDownload(url: string, filename: string) {
   a.click();
 }
 
+// Headless auto-generation: the daily cron opens this page via Browser
+// Rendering with ?autogen=<AEST date> (see src/handlers/gangsheet-autorender.ts
+// in the worker). The page renders that day's stored Shopify pull through the
+// normal pipeline, uploads the sheet to R2 as
+// gangsheets/<date>/<orderStart>-<orderEnd>.ai (instead of downloading), and
+// reports completion through window.__gangsheetAutoResult, which the puppeteer
+// driver polls.
+const autoGenDate = new URLSearchParams(window.location.search).get("autogen");
+
+function reportAuto(result: {
+  ok: boolean;
+  uploaded?: string;
+  skipped?: string;
+  error?: string;
+  items?: number;
+  errors?: number;
+}) {
+  (window as unknown as { __gangsheetAutoResult?: unknown }).__gangsheetAutoResult = result;
+}
+
+// First and last order numbers in a pulled CSV (Number column) — the auto
+// upload is named <start>-<end>.ai.
+function orderRange(csv: string): { start: number; end: number } | null {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const line of csv.split("\n").slice(1)) {
+    const m = line.match(/^"?(\d+)/);
+    if (!m) continue;
+    const n = Number(m[1]);
+    if (n < min) min = n;
+    if (n > max) max = n;
+  }
+  return Number.isFinite(min) ? { start: min, end: max } : null;
+}
+
 let nextJobId = 1;
 
 const pullBtnStyle: CSSProperties = {
@@ -281,6 +316,10 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
   const workerRef = useRef<Worker | null>(null);
   const queueRef = useRef<{ job: SheetJob; csv: ArrayBuffer }[]>([]);
   const busyRef = useRef(false);
+  // Auto-generation (?autogen=<date>): the running auto job's name, and a
+  // one-shot latch so the job is only enqueued once.
+  const autoJobNameRef = useRef<string | null>(null);
+  const autoStartedRef = useRef(false);
 
   const [runtimeStatus, setRuntimeStatus] = useState("Starting…");
   const [ready, setReady] = useState(false);
@@ -369,6 +408,38 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
           break;
         }
         case "done": {
+          // Auto mode: upload the sheet to R2 as the day's .ai instead of
+          // downloading, then hand the result to the puppeteer driver.
+          if (autoJobNameRef.current && msg.name === autoJobNameRef.current) {
+            const fileName = `${msg.name}.ai`;
+            try {
+              const resp = await fetch(
+                `/api/files?date=${autoGenDate}&name=${encodeURIComponent(fileName)}`,
+                {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/postscript" },
+                  body: new Blob([msg.pdf], { type: "application/postscript" }),
+                }
+              );
+              reportAuto(
+                resp.ok
+                  ? { ok: true, uploaded: fileName, items: msg.count, errors: msg.errors }
+                  : { ok: false, error: `Upload failed: HTTP ${resp.status}` }
+              );
+            } catch (e) {
+              reportAuto({ ok: false, error: `Upload failed: ${e}` });
+            }
+            setJobs((prev) =>
+              prev.map((j) =>
+                j.name === msg.name && j.status === "processing"
+                  ? { ...j, status: "done", detail: `Uploaded ${fileName}` }
+                  : j
+              )
+            );
+            busyRef.current = false;
+            pumpQueue();
+            break;
+          }
           const pdfBlobUrl = URL.createObjectURL(
             new Blob([msg.pdf], { type: "application/pdf" })
           );
@@ -396,6 +467,9 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
         }
         case "error":
           if (msg.name) {
+            if (autoJobNameRef.current && msg.name === autoJobNameRef.current) {
+              reportAuto({ ok: false, error: msg.text });
+            }
             setJobs((prev) =>
               prev.map((j) =>
                 j.name === msg.name && (j.status === "processing" || j.status === "queued")
@@ -406,6 +480,7 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
             busyRef.current = false;
             pumpQueue();
           } else {
+            if (autoGenDate) reportAuto({ ok: false, error: `Runtime error: ${msg.text}` });
             setRuntimeStatus(`Error: ${msg.text}`);
           }
           break;
@@ -418,12 +493,37 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
   }, []);
 
   useEffect(() => {
-    fetch("/api/gangsheet/daily")
+    fetch(autoGenDate ? `/api/gangsheet/daily?date=${autoGenDate}` : "/api/gangsheet/daily")
       .then(async (r) => {
         if (r.ok) setDaily(await r.json());
+        else if (autoGenDate) reportAuto({ ok: true, skipped: "no stored pull for date" });
       })
-      .catch(() => { /* no stored pull — banner just doesn't show */ });
+      .catch(() => {
+        // no stored pull — banner just doesn't show
+        if (autoGenDate) reportAuto({ ok: false, error: "daily pull fetch failed" });
+      });
   }, []);
+
+  // Auto mode: once the runtime is ready and the day's pull is loaded, run it
+  // through the normal queue exactly like the "Generate sheet" button, named
+  // <orderStart>-<orderEnd>. The done/error handlers above upload and report.
+  useEffect(() => {
+    if (!autoGenDate || !ready || !daily || autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    if (!daily.items) {
+      reportAuto({ ok: true, skipped: "no printable items" });
+      return;
+    }
+    const range = orderRange(daily.csv);
+    if (!range) {
+      reportAuto({ ok: true, skipped: "no order numbers in pull" });
+      return;
+    }
+    const name = `${range.start}-${range.end}`;
+    autoJobNameRef.current = name;
+    enqueueCsv(name, daily.csv, `Auto daily ${daily.date}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, daily]);
 
   /** Queue a CSV that arrived as text (Shopify pull) instead of a dropped file. */
   function enqueueCsv(name: string, csvText: string, fileName: string) {

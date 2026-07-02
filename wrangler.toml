@@ -1,6 +1,8 @@
 name = "bootink-internal-tools"
 main = "src/index.ts"
 compatibility_date = "2025-02-10"
+# @cloudflare/puppeteer (gangsheet auto-render) imports node:buffer
+compatibility_flags = ["nodejs_compat"]
 
 # Custom domain — UNCOMMENT once the bootink.com zone is added to this
 # Cloudflare account (DNS currently at GoDaddy; Workers custom domains
@@ -26,10 +28,17 @@ class_name = "DMState"
 tag = "v1"
 new_sqlite_classes = ["DMState"]
 
-# Crons: Meta token refresh (03:00 UTC), daily Shopify order pull for the
-# gangsheet (23:00 UTC ≈ 9am AEST), email auto-draft sweep (every 10 min)
+# Crons: Meta token refresh (03:00 UTC), daily Shopify order pull + automatic
+# gangsheet render/upload (23:00 UTC ≈ 9am AEST), email auto-draft sweep
+# (every 10 min)
 [triggers]
 crons = ["0 3 * * *", "0 23 * * *", "*/10 * * * *"]
+
+# Browser Rendering — the daily cron drives the dashboard's own gangsheet page
+# headlessly (same Pyodide pipeline as a manual run) and uploads the finished
+# .ai sheet to R2. See handlers/gangsheet-autorender.ts.
+[browser]
+binding = "BROWSER"
 
 # KV namespace for caching Instagram profiles
 [[kv_namespaces]]
@@ -48,6 +57,9 @@ CACHE_TTL_SECONDS = "86400"
 # Shopify Admin API (read-only order lookup — dedicated custom app, not the bundling app)
 SHOPIFY_STORE_DOMAIN = "u6pzrv-8k.myshopify.com"
 SHOPIFY_API_VERSION = "2026-04"
+# The worker's own public hostname — the headless gangsheet auto-render points
+# Browser Rendering here. Update if the tools.bootink.com custom domain goes live.
+SELF_HOST = "bootink-internal-tools.soft-smoke-9baf.workers.dev"
 
 # Secrets (set via `wrangler secret put <NAME>`):
 # - META_APP_ID

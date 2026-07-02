@@ -80,6 +80,7 @@ import {
   handleGetDailyOrders,
   storeDailyOrders,
 } from "./handlers/gangsheet-orders";
+import { renderDailyGangsheet } from "./handlers/gangsheet-autorender";
 import { handleDigest } from "./handlers/digest";
 import { autoDraftEmails } from "./handlers/email-autodraft";
 import {
@@ -412,7 +413,8 @@ export default {
 
   // Crons (see wrangler.toml [triggers]):
   //  - 03:00 UTC  daily Meta token refresh
-  //  - 23:00 UTC  (~9am AEST) Shopify order pull for the gangsheet
+  //  - 23:00 UTC  (~9am AEST) Shopify order pull, then automatic gangsheet
+  //               render + .ai upload (Browser Rendering, no human input)
   //  - */10       pre-draft AI replies for new unread emails
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     switch (event.cron) {
@@ -420,7 +422,7 @@ export default {
         ctx.waitUntil(refreshMetaTokenIfNeeded(env));
         break;
       case "0 23 * * *":
-        ctx.waitUntil(storeDailyOrders(env));
+        ctx.waitUntil(storeDailyOrders(env).then(() => renderDailyGangsheet(env)));
         break;
       case "*/10 * * * *":
         ctx.waitUntil(autoDraftEmails(env));

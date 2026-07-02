@@ -8,7 +8,7 @@ import { clog, cerr } from "../services/logger";
 // exact CSV the Python pipeline already parses, so the generator itself is
 // untouched. The cron-stored copy lives in R2 under orders-csv/<AEST date>.csv.
 
-const DAILY_PREFIX = "orders-csv/";
+export const DAILY_PREFIX = "orders-csv/";
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // The generator's parser reads exactly these columns (see main.py
@@ -39,7 +39,7 @@ function buildCsv(rows: { orderNumber: string; lineName: string; variantTitle: s
 
 /** The store's local (AEST, UTC+10) calendar date — used to label daily pulls
  *  so "today's orders" matches the operator's day, not UTC's. */
-function aestDate(now = new Date()): string {
+export function aestDate(now = new Date()): string {
   return new Date(now.getTime() + 10 * 3600_000).toISOString().slice(0, 10);
 }
 

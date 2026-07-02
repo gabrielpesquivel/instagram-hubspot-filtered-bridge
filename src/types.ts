@@ -56,6 +56,12 @@ export interface Env {
   ASSETS: Fetcher;
   DASHBOARD_PASSWORD: string;
   META_ADMIN_PASSWORD: string;
+
+  // Browser Rendering — daily headless gangsheet auto-render
+  // (handlers/gangsheet-autorender.ts)
+  BROWSER: Fetcher;
+  // This worker's public hostname (workers.dev or custom domain)
+  SELF_HOST: string;
 }
 
 // Instagram Webhook Payload
