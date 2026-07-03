@@ -36,8 +36,7 @@ export async function handleDigest(request: Request, env: Env): Promise<Response
   // disagrees with what the operator sees when they click through.
   const cutoff = Date.now() - 48 * 3600_000;
 
-  const [pending, emailUnread, igUnread, dailyOrders, sheetsToday] = await Promise.all([
-    state.listPending().then((l) => l.length).catch(() => null),
+  const [emailUnread, igUnread, dailyOrders, sheetsToday] = await Promise.all([
     (async () => {
       const token = await getValidGoogleToken(env);
       if (!token) return null;
@@ -85,7 +84,6 @@ export async function handleDigest(request: Request, env: Env): Promise<Response
 
   const payload = JSON.stringify({
     date,
-    pendingQueue: pending,   // messages awaiting approval right now
     emailUnread,             // unread Gmail threads, last 48h (null = not connected)
     igUnread,                // open IG threads the inbox shows (null = no data)
     dailyOrders,             // this morning's Shopify pull (null = not run)

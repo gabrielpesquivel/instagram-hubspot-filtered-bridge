@@ -6,7 +6,6 @@ import { useEffect, useState, type CSSProperties } from "react";
 
 interface DigestData {
   date: string;
-  pendingQueue: number | null;
   emailUnread: number | null;
   igUnread: number | null;
   sheetsUploaded: number | null;
@@ -38,7 +37,7 @@ export function DigestCard() {
   // in after the fetch makes the whole page jump.
   const loading = data === null;
   const needsAttention = data
-    ? (data.pendingQueue || 0) + (data.emailUnread || 0) + (data.igUnread || 0)
+    ? (data.emailUnread || 0) + (data.igUnread || 0)
     : null;
 
   return (
@@ -49,7 +48,6 @@ export function DigestCard() {
       </div>
 
       <div style={{ ...styles.row, opacity: loading ? 0.5 : 1 }}>
-        <Item label="Awaiting approval" value={fmt(data?.pendingQueue ?? null)} color={(data?.pendingQueue || 0) > 0 ? "#ff9800" : undefined} />
         <Item label="Unread emails" value={fmt(data?.emailUnread ?? null)} color={(data?.emailUnread || 0) > 0 ? "#ff9800" : undefined} />
         <Item label="Unread DMs" value={fmt(data?.igUnread ?? null)} color={(data?.igUnread || 0) > 0 ? "#ff9800" : undefined} />
         <Item
