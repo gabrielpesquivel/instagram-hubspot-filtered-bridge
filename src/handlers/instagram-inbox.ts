@@ -18,7 +18,7 @@ import type { ConversationMessage } from "../types";
 const DONE_KEY = "ig_done_map";
 const DONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
-async function getDoneMap(env: Env): Promise<Record<string, number>> {
+export async function getDoneMap(env: Env): Promise<Record<string, number>> {
   return ((await env.PROFILE_CACHE.get(DONE_KEY, "json")) as Record<string, number>) || {};
 }
 

@@ -4,6 +4,8 @@ import { getDMState } from "../dm-state";
 import { getValidGoogleToken } from "../services/google-oauth";
 import { listUnreadThreads } from "../services/gmail-api";
 import { listInstagramConversations } from "../services/instagram-conversations";
+import { getDoneMap } from "./instagram-inbox";
+import { isBlocklisted } from "../services/blocklist";
 
 // Daily digest for the dashboard widget: one call aggregating what needs
 // attention this morning. Every section is fail-soft (null = source
@@ -29,19 +31,42 @@ export async function handleDigest(request: Request, env: Env): Promise<Response
   }
   const date = aestDate();
   const state = getDMState(env);
+  // Counts mirror the support inbox exactly (same 48h activity window and
+  // done/blocklist filters, see dashboard/src/Inbox.tsx) so the digest never
+  // disagrees with what the operator sees when they click through.
+  const cutoff = Date.now() - 48 * 3600_000;
 
-  const [stats, pending, emailUnread, igUnread, dailyOrders, sheetsToday] = await Promise.all([
-    state.getAllStats().catch(() => null),
+  const [pending, emailUnread, igUnread, dailyOrders, sheetsToday] = await Promise.all([
     state.listPending().then((l) => l.length).catch(() => null),
     (async () => {
       const token = await getValidGoogleToken(env);
       if (!token) return null;
-      return (await listUnreadThreads(token)).length;
+      const threads = await listUnreadThreads(token);
+      return threads.filter((t) => Date.parse(t.date) >= cutoff).length;
     })().catch(() => null),
     (async () => {
-      const all = await listInstagramConversations(env);
-      if (all === null) return null;
-      return all.filter((c) => c.unread).length;
+      // Store conversations + live Graph threads, deduped by sender — the
+      // Graph unread_count alone is unreliable (resets on API reads).
+      const [convos, live] = await Promise.all([
+        state.listConversations().catch(() => []),
+        listInstagramConversations(env),
+      ]);
+      if (live === null && !convos.length) return null;
+      const storeIds = new Set(convos.map((c) => c.senderId));
+      let count = convos.filter((c) => Date.parse(c.lastMessageAt) >= cutoff).length;
+      if (live) {
+        const doneMap = await getDoneMap(env);
+        for (const c of live) {
+          if (storeIds.has(c.senderId)) continue;
+          const at = Date.parse(c.updatedTime) || 0;
+          if (at < cutoff) continue;
+          const doneAt = doneMap[c.senderId];
+          if (doneAt && at <= doneAt) continue;
+          if (await isBlocklisted(c.senderId, env, c.username)) continue;
+          count++;
+        }
+      }
+      return count;
     })().catch(() => null),
     (async () => {
       const head = await env.GANGSHEET_FILES.head(`orders-csv/${date}.csv`);
@@ -60,20 +85,11 @@ export async function handleDigest(request: Request, env: Env): Promise<Response
 
   const payload = JSON.stringify({
     date,
-    // Message flow today (DO daily counters)
-    stats: stats
-      ? {
-          forwarded: stats.forwarded.today,
-          replied: stats.replied.today,
-          pending: stats.pending.today,
-          errors: stats.errors.today,
-        }
-      : null,
     pendingQueue: pending,   // messages awaiting approval right now
-    emailUnread,             // unread Gmail threads (null = not connected)
-    igUnread,                // unread IG threads (null = Graph unavailable)
+    emailUnread,             // unread Gmail threads, last 48h (null = not connected)
+    igUnread,                // open IG threads the inbox shows (null = no data)
     dailyOrders,             // this morning's Shopify pull (null = not run)
-    sheetsUploaded: sheetsToday, // files stored for today in the File Calendar
+    sheetsUploaded: sheetsToday, // files stored for today — >0 means gangsheet done
   });
   await env.PROFILE_CACHE.put(CACHE_KEY, payload, { expirationTtl: CACHE_TTL });
   return new Response(payload, { headers: { "Content-Type": "application/json" } });

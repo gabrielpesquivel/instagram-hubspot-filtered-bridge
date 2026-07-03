@@ -6,10 +6,10 @@ import { useEffect, useState, type CSSProperties } from "react";
 
 interface DigestData {
   date: string;
-  stats: { forwarded: number; replied: number; pending: number; errors: number } | null;
   pendingQueue: number | null;
   emailUnread: number | null;
   igUnread: number | null;
+  sheetsUploaded: number | null;
 }
 
 const fmt = (n: number | null | undefined) => (n === null || n === undefined ? "—" : String(n));
@@ -49,10 +49,14 @@ export function DigestCard() {
       </div>
 
       <div style={{ ...styles.row, opacity: loading ? 0.5 : 1 }}>
-        <Item label="Awaiting approval" value={fmt(data?.pendingQueue ?? null)} hot={(data?.pendingQueue || 0) > 0} />
-        <Item label="Unread emails" value={fmt(data?.emailUnread ?? null)} hot={(data?.emailUnread || 0) > 0} />
-        <Item label="Unread DMs" value={fmt(data?.igUnread ?? null)} hot={(data?.igUnread || 0) > 0} />
-        <Item label="Replied today" value={fmt(data?.stats?.replied ?? null)} />
+        <Item label="Awaiting approval" value={fmt(data?.pendingQueue ?? null)} color={(data?.pendingQueue || 0) > 0 ? "#ff9800" : undefined} />
+        <Item label="Unread emails" value={fmt(data?.emailUnread ?? null)} color={(data?.emailUnread || 0) > 0 ? "#ff9800" : undefined} />
+        <Item label="Unread DMs" value={fmt(data?.igUnread ?? null)} color={(data?.igUnread || 0) > 0 ? "#ff9800" : undefined} />
+        <Item
+          label="Gangsheet"
+          value={data?.sheetsUploaded == null ? "—" : data.sheetsUploaded > 0 ? "✓" : "✗"}
+          color={data?.sheetsUploaded == null ? undefined : data.sheetsUploaded > 0 ? "#2e7d32" : "#d32f2f"}
+        />
       </div>
 
       {needsAttention === 0 && (
@@ -62,10 +66,10 @@ export function DigestCard() {
   );
 }
 
-function Item({ label, value, hot }: { label: string; value: string; hot?: boolean }) {
+function Item({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div style={styles.item}>
-      <div style={{ ...styles.itemValue, color: hot ? "#ff9800" : "inherit" }}>{value}</div>
+      <div style={{ ...styles.itemValue, color: color || "inherit" }}>{value}</div>
       <div style={styles.itemLabel}>{label}</div>
     </div>
   );
