@@ -80,7 +80,11 @@ SELF_HOST = "bootink-internal-tools.soft-smoke-9baf.workers.dev"
 #                            it, e.g. #10033 returns "not found" even though it exists —
 #                            a Shopify API limit, not a bug. Enable it on the custom app.
 #                          - write_orders    : order WRITE actions (address/email/cancel/
-#                            refund/duplicate/add).
+#                            refund/duplicate).
+#                          - write_order_edits : add items to an existing order (the
+#                            orderEditBegin/AddVariant/Commit flow needs this scope,
+#                            write_orders alone is NOT enough).
+#                          - read_products   : variant search for the add-to-order picker.
 #                          After changing scopes, the cached KV token must refresh (it
 #                          re-exchanges within 24h; delete the shopify_access_token KV
 #                          key to force it immediately).
