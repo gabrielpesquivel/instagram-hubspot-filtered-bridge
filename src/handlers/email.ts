@@ -381,7 +381,9 @@ export async function handleSendEmailReply(
   if (!conn || !token) return jsonResponse({ error: "Gmail not connected" }, 409);
 
   const body = (await request.json().catch(() => ({}))) as { text?: string; aiSuggestion?: string };
-  const text = (body.text || "").trim();
+  // Collapse 3+ newlines: the contentEditable composer historically doubled
+  // breaks (div blocks vs literal \n), which textToHtml turns into big gaps.
+  const text = (body.text || "").replace(/\n{3,}/g, "\n\n").trim();
   if (!text) return jsonResponse({ error: "Empty reply" }, 400);
 
   const useGmailSig = (await env.PROFILE_CACHE.get(USE_GMAIL_SIG_KEY)) === "true";

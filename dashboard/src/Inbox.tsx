@@ -1089,6 +1089,12 @@ export function Inbox() {
                   if (e.key === "Enter" && !e.shiftKey && selected.channel === "instagram") {
                     e.preventDefault();
                     handleSend();
+                  } else if (e.key === "Enter" && selected.channel === "email") {
+                    // Default Enter wraps lines in <div> blocks, which double up
+                    // against the literal \n text nodes set by setEditorContent —
+                    // innerText then reads extra newlines. Insert a <br> instead.
+                    e.preventDefault();
+                    document.execCommand("insertLineBreak");
                   }
                 }}
               />
