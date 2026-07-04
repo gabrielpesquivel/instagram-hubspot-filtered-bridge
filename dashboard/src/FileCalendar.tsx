@@ -7,7 +7,7 @@ interface FileEntry {
   uploaded: string;
 }
 
-const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 // Local-time YYYY-MM-DD (avoids UTC off-by-one from toISOString)
 function ymd(d: Date): string {
@@ -39,20 +39,15 @@ function formatSize(bytes: number): string {
 }
 
 function weekLabel(monday: Date): string {
-  const fri = addDays(monday, 4);
+  const sunday = addDays(monday, 6);
   const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
-  return `${monday.toLocaleDateString(undefined, opts)} – ${fri.toLocaleDateString(undefined, opts)}`;
+  return `${monday.toLocaleDateString(undefined, opts)} – ${sunday.toLocaleDateString(undefined, opts)}`;
 }
 
 export function FileCalendar() {
   const today = new Date();
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(today));
-  const [selected, setSelected] = useState<string>(() => {
-    const dow = today.getDay();
-    // If weekend, default selection to the upcoming Monday
-    if (dow === 0 || dow === 6) return ymd(mondayOf(addDays(today, dow === 0 ? 1 : 2)));
-    return ymd(today);
-  });
+  const [selected, setSelected] = useState<string>(() => ymd(today));
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -307,7 +302,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   daysRow: {
     display: "grid",
-    gridTemplateColumns: "repeat(5, 1fr)",
+    gridTemplateColumns: "repeat(7, 1fr)",
     gap: "0.5rem",
   },
   day: {
