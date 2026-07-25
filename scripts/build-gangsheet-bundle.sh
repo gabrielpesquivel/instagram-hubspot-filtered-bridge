@@ -15,6 +15,14 @@ if [ ! -f "$GEN/app/main.py" ]; then
   exit 1
 fi
 
+# The sidecar pre-render below imports the generator's pdf_utils, which needs
+# its Python deps (PIL, reportlab, svglib, pdfrw). Prefer the generator's own
+# venv when present so a bare `npm run deploy` works without activating it.
+PY="python3"
+if [ -x "$GEN/.venv/bin/python3" ]; then
+  PY="$GEN/.venv/bin/python3"
+fi
+
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
@@ -37,7 +45,7 @@ if ! command -v rsvg-convert >/dev/null 2>&1; then
   echo "       (macOS: brew install librsvg; Debian: apt install librsvg2-bin)." >&2
   exit 1
 fi
-(cd "$STAGE" && python3 -c "
+(cd "$STAGE" && "$PY" -c "
 import os, sys, subprocess
 sys.path.insert(0, 'app')
 from src import pdf_utils
@@ -60,7 +68,7 @@ print('  pre-rendered %d gradient/clipPath SVGs to vector PDF sidecars' % count)
 
 # Python zipfile (not the zip CLI): it sets the UTF-8 filename flag, which
 # Pyodide's unzip needs for accented filenames like TÜRKIYE.svg.
-(cd "$STAGE" && python3 -c "
+(cd "$STAGE" && "$PY" -c "
 import os, zipfile
 with zipfile.ZipFile('bundle.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
     for top in ['app', 'assets', 'web_runner.py']:
