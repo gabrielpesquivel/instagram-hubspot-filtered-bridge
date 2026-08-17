@@ -10,9 +10,9 @@ node_modules/
 .env.*
 *.local
 
-# Build
+# Build (root output only — dashboard/public/ is Vite source and must stay tracked)
 dist/
-public/
+/public/
 
 # OS
 .DS_Store
