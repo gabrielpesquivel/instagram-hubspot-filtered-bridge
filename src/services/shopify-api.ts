@@ -324,7 +324,13 @@ export interface OrderWriteContext {
   cancelledAt: string | null;
   currency: string;            // presentment currency, for refunds
   shippingAddress: StructuredAddress | null;
-  lineItems: { id: string; variantId: string | null; title: string; quantity: number }[];
+  lineItems: {
+    id: string;
+    variantId: string | null;
+    title: string;
+    quantity: number;
+    properties: { key: string; value: string }[];
+  }[];
 }
 
 const GRAPHQL_ENDPOINT = (env: Env) =>
@@ -370,7 +376,7 @@ const ORDER_CTX_QUERY = `query($q: String!) {
       displayFulfillmentStatus displayFinancialStatus
       currentTotalPriceSet { presentmentMoney { currencyCode } }
       shippingAddress { firstName lastName company address1 address2 city province zip country phone }
-      lineItems(first: 50) { edges { node { id title quantity variant { id } } } }
+      lineItems(first: 50) { edges { node { id title quantity variant { id } customAttributes { key value } } } }
     } }
   }
 }`;
@@ -392,7 +398,7 @@ export async function getOrderForWrite(env: Env, name: string): Promise<OrderWri
       displayFulfillmentStatus: string | null; displayFinancialStatus: string | null;
       currentTotalPriceSet: { presentmentMoney: { currencyCode: string } } | null;
       shippingAddress: AddrNode | null;
-      lineItems: { edges: { node: { id: string; title: string; quantity: number; variant: { id: string } | null } }[] };
+      lineItems: { edges: { node: { id: string; title: string; quantity: number; variant: { id: string } | null; customAttributes: { key: string; value: string | null }[] } }[] };
     } }[] };
   }>(env, ORDER_CTX_QUERY, { q: `name:#${clean} OR name:${clean}` });
   const node = data.orders.edges[0]?.node;
@@ -416,6 +422,9 @@ export async function getOrderForWrite(env: Env, name: string): Promise<OrderWri
       variantId: e.node.variant?.id || null,
       title: e.node.title,
       quantity: e.node.quantity,
+      properties: (e.node.customAttributes || [])
+        .filter((a) => a.value != null && a.value !== "")
+        .map((a) => ({ key: a.key, value: a.value as string })),
     })),
   };
 }
@@ -639,7 +648,7 @@ export async function createReplacementOrder(
   opts: {
     email: string;
     shippingAddress: StructuredAddress;
-    items: { variantId: string; quantity: number }[];
+    items: { variantId: string; quantity: number; properties?: { key: string; value: string }[] }[];
     note?: string;
   }
 ): Promise<string> {
@@ -657,7 +666,13 @@ export async function createReplacementOrder(
         zip: opts.shippingAddress.zip, country: canonCountry(opts.shippingAddress.country),
         phone: opts.shippingAddress.phone,
       },
-      lineItems: opts.items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
+      lineItems: opts.items.map((i) => ({
+        variantId: i.variantId,
+        quantity: i.quantity,
+        // Line item properties (custom names, initials, etc.) — without these
+        // the replacement renders blank on the gangsheet.
+        ...(i.properties?.length ? { customAttributes: i.properties } : {}),
+      })),
       appliedDiscount: { valueType: "PERCENTAGE", value: 100, description: "Replacement (no charge)" },
     } }
   );

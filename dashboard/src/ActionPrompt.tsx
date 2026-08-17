@@ -321,11 +321,12 @@ function CancelRefundForm({ proposal, onDone }: FormProps) {
 }
 
 // ── duplicate_order ───────────────────────────────────────────────────────────
-interface LI { variantId: string | null; title: string; quantity: number; }
+interface LI { variantId: string | null; title: string; quantity: number; properties?: { key: string; value: string }[]; }
 function DuplicateForm({ proposal, onDone }: FormProps) {
   const [order, setOrder] = useState(cleanOrder(proposal.orderNumber || arg(proposal, "order_number")));
   const [items, setItems] = useState<LI[] | null>(null);
   const [sel, setSel] = useState<Record<number, boolean>>({});
+  const [qty, setQty] = useState<Record<number, number>>({});
   const [loadErr, setLoadErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -338,15 +339,21 @@ function DuplicateForm({ proposal, onDone }: FormProps) {
     const lis: LI[] = data.lineItems || [];
     setItems(lis);
     const init: Record<number, boolean> = {};
-    lis.forEach((li, i) => { init[i] = true; }); // preselect all; agent trims to the relevant ones
+    const q: Record<number, number> = {};
+    lis.forEach((li, i) => { init[i] = true; q[i] = li.quantity; }); // preselect all at full qty; agent trims
     setSel(init);
+    setQty(q);
   }
   useEffect(() => { if (order) load(); /* eslint-disable-next-line */ }, []);
 
   async function submit() {
     if (!items) return toast("Load the order first");
     const chosen = items.map((li, i) => ({ li, i })).filter(({ li, i }) => sel[i] && li.variantId)
-      .map(({ li }) => ({ variantId: li.variantId as string, quantity: li.quantity }));
+      .map(({ li, i }) => ({
+        variantId: li.variantId as string,
+        quantity: Math.min(li.quantity, Math.max(1, qty[i] || 1)),
+        properties: li.properties || [],
+      }));
     if (!chosen.length) return toast("Select at least one replaceable item");
     setBusy(true);
     try {
@@ -364,13 +371,31 @@ function DuplicateForm({ proposal, onDone }: FormProps) {
       </div>
       {loadErr && <div style={styles.err}>{loadErr}</div>}
       {items && items.length === 0 && <div style={styles.hint}>No line items found.</div>}
-      {items && items.map((li, i) => (
-        <label key={i} style={{ ...styles.itemRow, opacity: li.variantId ? 1 : 0.5 }}>
-          <input type="checkbox" disabled={!li.variantId} checked={!!sel[i]} onChange={(e) => setSel((p) => ({ ...p, [i]: e.target.checked }))} />
-          <span>{li.quantity}× {li.title}{!li.variantId && " (no variant — can't replace)"}</span>
-        </label>
-      ))}
-      <div style={styles.hint}>Replacement is created at $0, shipped to the original address.</div>
+      {items && items.map((li, i) => {
+        const shown = (li.properties || []).filter((p) => !p.key.startsWith("_"));
+        return (
+          <div key={i} style={{ opacity: li.variantId ? 1 : 0.5 }}>
+            <label style={styles.itemRow}>
+              <input type="checkbox" disabled={!li.variantId} checked={!!sel[i]} onChange={(e) => setSel((p) => ({ ...p, [i]: e.target.checked }))} />
+              {li.quantity > 1 && li.variantId ? (
+                <>
+                  <input type="number" min={1} max={li.quantity} value={qty[i] ?? li.quantity} style={styles.qty}
+                    onChange={(e) => setQty((p) => ({ ...p, [i]: Math.min(li.quantity, Math.max(1, Number(e.target.value) || 1)) }))} />
+                  <span>of {li.quantity}× {li.title}</span>
+                </>
+              ) : (
+                <span>{li.quantity}× {li.title}{!li.variantId && " (no variant — can't replace)"}</span>
+              )}
+            </label>
+            {shown.length > 0 && (
+              <div style={styles.props}>
+                {shown.map((p, j) => <div key={j}>{p.key}: {p.value}</div>)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div style={styles.hint}>Replacement is created at $0, shipped to the original address. Item attributes (names, initials, etc.) are copied over.</div>
       <SubmitRow busy={busy} label="Create $0 replacement" onClick={submit} />
     </div>
   );
@@ -490,6 +515,7 @@ const styles: Record<string, React.CSSProperties> = {
   segOff: { flex: 1, padding: "0.45rem", background: "var(--surface-2)", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer" },
   check: { display: "flex", alignItems: "center", gap: "0.45rem", fontSize: "0.82rem", color: "var(--text-muted)" },
   itemRow: { display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.83rem", padding: "0.25rem 0" },
+  props: { margin: "0 0 0.2rem 1.6rem", fontSize: "0.76rem", color: "var(--text-muted)", lineHeight: 1.5 },
   loadBtn: { padding: "0.5rem 0.8rem", background: "var(--surface-2)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "0.8rem", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },
   addBtn: { padding: "0.3rem 0.7rem", background: "#2196f3", color: "#fff", border: "none", borderRadius: "7px", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer" },
   qty: { width: "3rem", padding: "0.3rem", background: "var(--surface-2)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "7px", fontSize: "0.8rem" },

@@ -215,15 +215,28 @@ export async function handleDuplicateOrder(request: Request, env: Env): Promise<
   if (order instanceof Response) return order;
 
   // Resolve items: explicit selection, else clone everything that has a variant.
-  let items: { variantId: string; quantity: number }[];
+  // Properties (custom names/initials) ride along either way so the replacement
+  // carries the same personalisation as the original.
+  type DupItem = { variantId: string; quantity: number; properties?: { key: string; value: string }[] };
+  const asProperties = (raw: unknown): { key: string; value: string }[] =>
+    Array.isArray(raw)
+      ? (raw as { key?: unknown; value?: unknown }[])
+          .filter((p) => p && typeof p.key === "string" && typeof p.value === "string")
+          .map((p) => ({ key: p.key as string, value: p.value as string }))
+      : [];
+  let items: DupItem[];
   if (Array.isArray(body.items) && body.items.length) {
-    items = (body.items as { variantId?: string; quantity?: number }[])
+    items = (body.items as { variantId?: string; quantity?: number; properties?: unknown }[])
       .filter((i) => i.variantId)
-      .map((i) => ({ variantId: String(i.variantId), quantity: Math.max(1, Number(i.quantity) || 1) }));
+      .map((i) => ({
+        variantId: String(i.variantId),
+        quantity: Math.max(1, Number(i.quantity) || 1),
+        properties: asProperties(i.properties),
+      }));
   } else {
     items = order.lineItems
       .filter((li) => li.variantId)
-      .map((li) => ({ variantId: li.variantId as string, quantity: li.quantity }));
+      .map((li) => ({ variantId: li.variantId as string, quantity: li.quantity, properties: li.properties }));
   }
   if (!items.length) {
     return jsonResponse({ error: "No replaceable items (line items have no variant — make the replacement manually)" }, 422);
@@ -296,7 +309,7 @@ export async function handleGetOrderItems(request: Request, env: Env): Promise<R
       fulfilled: isFulfilled(ctx),
       cancelled: !!ctx.cancelledAt,
       shippingAddress: ctx.shippingAddress,
-      lineItems: ctx.lineItems.map((li) => ({ variantId: li.variantId, title: li.title, quantity: li.quantity })),
+      lineItems: ctx.lineItems.map((li) => ({ variantId: li.variantId, title: li.title, quantity: li.quantity, properties: li.properties })),
     });
   } catch (error) {
     await cerr(env, "order-items lookup failed:", error);
