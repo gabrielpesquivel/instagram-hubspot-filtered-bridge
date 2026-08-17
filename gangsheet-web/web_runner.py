@@ -217,20 +217,17 @@ def render(name):
 
     layout_mgr = layout.OptimizedLayoutManager()
     placed_items = layout_mgr.place_items(items)
-    sheet_height = layout_mgr.total_height
 
     out_path = f'/tmp/{name}_gangsheet.pdf'
-    c = pdf_utils.setup_canvas(out_path, (config.PAGE_WIDTH, sheet_height))
-    render_failures = 0
-    for x, y, page, item in placed_items:
-        if not gangsheet_main.render_item(c, x, y, item, draw_cutting_border=True):
-            render_failures += 1
+    c = pdf_utils.setup_canvas(out_path, (config.PAGE_WIDTH, config.PAGE_HEIGHT))
+    render_failures = gangsheet_main.render_sheet(c, placed_items, layout_mgr.num_pages)
     c.save()
 
     return json.dumps({
         'pdf_path': out_path,
         'width_mm': round(config.PAGE_WIDTH / config.MM_TO_PTS),
-        'height_mm': round(sheet_height / config.MM_TO_PTS),
+        'height_mm': round(config.PAGE_HEIGHT / config.MM_TO_PTS),
+        'pages': layout_mgr.num_pages,
         # Items whose artwork failed to draw (fluro-yellow tag substituted)
         'render_failures': render_failures,
     })
