@@ -339,6 +339,8 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
   const [pulling, setPulling] = useState(false);
   const [pullFrom, setPullFrom] = useState("");
   const [pullTo, setPullTo] = useState("");
+  const [pullOrderFrom, setPullOrderFrom] = useState("");
+  const [pullOrderTo, setPullOrderTo] = useState("");
 
   function updateJob(id: number, patch: Partial<SheetJob>) {
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
@@ -569,6 +571,36 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
     }
   }
 
+  async function handlePullOrderRange() {
+    if (pulling || !pullOrderFrom || !pullOrderTo) return;
+    setPulling(true);
+    try {
+      const params = new URLSearchParams({
+        fromOrder: pullOrderFrom.replace(/^#/, "").trim(),
+        toOrder: pullOrderTo.replace(/^#/, "").trim(),
+      });
+      const res = await fetch(`/api/gangsheet/orders?${params.toString()}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setLogs((prev) => [...prev, `Shopify pull failed: ${data.error || res.status}`]);
+        return;
+      }
+      if (!data.items) {
+        setLogs((prev) => [...prev, `Shopify pull: ${data.orders} orders, no printable items in #${data.fromOrder}–#${data.toOrder}`]);
+        return;
+      }
+      enqueueCsv(
+        `Orders_${data.fromOrder}-${data.toOrder}`,
+        data.csv,
+        `Shopify pull — orders #${data.fromOrder}–#${data.toOrder}: ${data.orders} orders, ${data.items} items`
+      );
+    } catch {
+      setLogs((prev) => [...prev, "Shopify pull failed: network error"]);
+    } finally {
+      setPulling(false);
+    }
+  }
+
   async function addFiles(files: FileList | File[]) {
     for (const file of Array.from(files)) {
       if (!file.name.toLowerCase().endsWith(".csv")) continue;
@@ -661,6 +693,38 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
               disabled={pulling || !ready}
               onClick={handlePull}
               style={{ ...pullBtnStyle, opacity: pulling || !ready ? 0.5 : 1 }}
+            >
+              {pulling ? "Pulling…" : "Pull orders"}
+            </button>
+          </div>
+          <div style={styles.jobRow}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={styles.jobName}>Pull order number range from Shopify</div>
+              <div style={{ ...styles.jobDetail, display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="#12500"
+                  value={pullOrderFrom}
+                  onChange={(e) => setPullOrderFrom(e.target.value)}
+                  style={{ ...dateInputStyle, width: "6.5rem" }}
+                />
+                <span>to</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="#12560"
+                  value={pullOrderTo}
+                  onChange={(e) => setPullOrderTo(e.target.value)}
+                  style={{ ...dateInputStyle, width: "6.5rem" }}
+                />
+                <span style={{ opacity: 0.7 }}>(inclusive, both required)</span>
+              </div>
+            </div>
+            <button
+              disabled={pulling || !ready || !pullOrderFrom.trim() || !pullOrderTo.trim()}
+              onClick={handlePullOrderRange}
+              style={{ ...pullBtnStyle, opacity: pulling || !ready || !pullOrderFrom.trim() || !pullOrderTo.trim() ? 0.5 : 1 }}
             >
               {pulling ? "Pulling…" : "Pull orders"}
             </button>

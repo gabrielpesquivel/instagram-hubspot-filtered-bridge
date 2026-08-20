@@ -252,7 +252,10 @@ const GANGSHEET_ORDERS_QUERY = `query($q: String!, $n: Int!, $cursor: String) {
 export async function fetchGangsheetRows(
   env: Env,
   fromISO: string,
-  toISO: string
+  toISO: string,
+  // Optional inclusive order-number filter applied on top of the date window
+  // (used by the order-range pull, where the window merely brackets the range).
+  orderRange?: { lo: number; hi: number }
 ): Promise<{ rows: GangsheetLineRow[]; orderCount: number }> {
   type Node = {
     name: string;
@@ -273,6 +276,10 @@ export async function fetchGangsheetRows(
     } = await adminGraphQL(env, GANGSHEET_ORDERS_QUERY, { q, n: 50, cursor });
     for (const { node } of data.orders.edges) {
       if (node.cancelledAt) continue;
+      if (orderRange) {
+        const num = Number(node.name.replace(/^#/, ""));
+        if (!(num >= orderRange.lo && num <= orderRange.hi)) continue;
+      }
       orderCount++;
       for (const { node: li } of node.lineItems.edges) {
         if (li.currentQuantity <= 0) continue; // fully refunded/removed
@@ -292,6 +299,39 @@ export async function fetchGangsheetRows(
     cursor = data.orders.pageInfo.endCursor;
   }
   return { rows, orderCount };
+}
+
+/** createdAt of a single order looked up by number — used to anchor the
+ *  order-number-range pull. Throws when the order can't be found (typo, or
+ *  older than 60 days without the read_all_orders scope). */
+async function orderCreatedAt(env: Env, orderNumber: number): Promise<string> {
+  const data = await adminGraphQL<{ orders: { edges: { node: { createdAt: string } }[] } }>(
+    env,
+    `query($q: String!) { orders(first: 1, query: $q) { edges { node { createdAt } } } }`,
+    { q: nameFilter(String(orderNumber)) }
+  );
+  const node = data.orders.edges[0]?.node;
+  if (!node) throw new Error(`Order #${orderNumber} not found`);
+  return node.createdAt;
+}
+
+/** Printable line rows for an inclusive order-number range. Shopify has no
+ *  order-number range filter, but numbers are assigned in creation order, so
+ *  the two endpoint orders' createdAt bracket the whole range: pull that date
+ *  window, then keep only rows whose number falls inside the range. */
+export async function fetchGangsheetRowsByOrderRange(
+  env: Env,
+  fromOrder: number,
+  toOrder: number
+): Promise<{ rows: GangsheetLineRow[]; orderCount: number }> {
+  const [lo, hi] = fromOrder <= toOrder ? [fromOrder, toOrder] : [toOrder, fromOrder];
+  const [loCreated, hiCreated] = await Promise.all([
+    orderCreatedAt(env, lo),
+    lo === hi ? orderCreatedAt(env, lo) : orderCreatedAt(env, hi),
+  ]);
+  // created_at:< is exclusive — nudge past the last order's timestamp.
+  const toISO = new Date(Date.parse(hiCreated) + 1000).toISOString();
+  return fetchGangsheetRows(env, loCreated, toISO, { lo, hi });
 }
 
 // ── Writes ───────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import type { Env } from "../types";
 import { isAuthenticated, jsonResponse } from "../utils/auth";
-import { fetchGangsheetRows, shopifyConfigured } from "../services/shopify-api";
+import { fetchGangsheetRows, fetchGangsheetRowsByOrderRange, shopifyConfigured } from "../services/shopify-api";
 import { clog, cerr } from "../services/logger";
 
 // Daily Shopify order pull for the gangsheet generator — replaces the manual
@@ -49,8 +49,9 @@ async function pullWindow(env: Env, fromISO: string, toISO: string) {
 }
 
 // GET /api/gangsheet/orders?from=<ISO>&to=<ISO> — on-demand pull. Defaults to
-// the last 24 hours. Returns the CSV inline for the dashboard to feed straight
-// into the Pyodide pipeline.
+// the last 24 hours. Alternatively ?fromOrder=<num>&toOrder=<num> pulls an
+// inclusive order-number range instead. Returns the CSV inline for the
+// dashboard to feed straight into the Pyodide pipeline.
 export async function handlePullOrders(request: Request, env: Env): Promise<Response> {
   if (!(await isAuthenticated(request, env))) {
     return jsonResponse({ error: "Unauthorized" }, 401);
@@ -59,6 +60,28 @@ export async function handlePullOrders(request: Request, env: Env): Promise<Resp
     return jsonResponse({ error: "Shopify is not configured" }, 503);
   }
   const params = new URL(request.url).searchParams;
+  if (params.get("fromOrder") || params.get("toOrder")) {
+    const lo = Number(params.get("fromOrder"));
+    const hi = Number(params.get("toOrder"));
+    if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo <= 0 || hi <= 0) {
+      return jsonResponse({ error: "Invalid order number range — both order numbers are required" }, 400);
+    }
+    try {
+      const { rows, orderCount } = await fetchGangsheetRowsByOrderRange(env, lo, hi);
+      return jsonResponse({
+        csv: buildCsv(rows),
+        orders: orderCount,
+        items: rows.length,
+        fromOrder: Math.min(lo, hi),
+        toOrder: Math.max(lo, hi),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Order pull failed";
+      if (message.includes("not found")) return jsonResponse({ error: message }, 404);
+      await cerr(env, "Gangsheet order-range pull error:", error);
+      return jsonResponse({ error: message }, 502);
+    }
+  }
   const to = params.get("to") || new Date().toISOString();
   const from = params.get("from") || new Date(Date.parse(to) - 24 * 3600_000).toISOString();
   if (Number.isNaN(Date.parse(from)) || Number.isNaN(Date.parse(to)) || Date.parse(from) >= Date.parse(to)) {

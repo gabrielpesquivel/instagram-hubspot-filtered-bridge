@@ -220,13 +220,16 @@ def render(name):
 
     out_path = f'/tmp/{name}_gangsheet.pdf'
     c = pdf_utils.setup_canvas(out_path, (config.PAGE_WIDTH, config.PAGE_HEIGHT))
-    render_failures = gangsheet_main.render_sheet(c, placed_items, layout_mgr.num_pages)
+    render_failures = gangsheet_main.render_sheet(
+        c, placed_items, layout_mgr.num_pages, layout_mgr.page_heights)
     c.save()
 
     return json.dumps({
         'pdf_path': out_path,
         'width_mm': round(config.PAGE_WIDTH / config.MM_TO_PTS),
-        'height_mm': round(config.PAGE_HEIGHT / config.MM_TO_PTS),
+        # Tallest page: the full 850 for multi-sheet jobs, the cropped
+        # quick-start sheet for single-sheet jobs.
+        'height_mm': round(max(layout_mgr.page_heights) / config.MM_TO_PTS),
         'pages': layout_mgr.num_pages,
         # Items whose artwork failed to draw (fluro-yellow tag substituted)
         'render_failures': render_failures,
