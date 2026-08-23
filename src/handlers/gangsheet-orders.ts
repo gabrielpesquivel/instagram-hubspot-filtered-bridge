@@ -121,13 +121,24 @@ export async function handleGetDailyOrders(request: Request, env: Env): Promise<
   });
 }
 
-/** Cron entry: pull the last 24h of orders and store the CSV in R2, labelled
+/** Cron entry: pull the last day of orders and store the CSV in R2, labelled
  *  with the AEST date. Overwrites any earlier pull for the same day (rerunning
- *  the cron refreshes the snapshot). Fail-soft — a bad day logs and moves on. */
-export async function storeDailyOrders(env: Env): Promise<void> {
-  if (!shopifyConfigured(env)) return;
+ *  the cron refreshes the snapshot). Fail-soft — a bad day logs and moves on.
+ *
+ *  Weekends (AEST) are skipped entirely; Monday's pull covers Friday 9am →
+ *  Monday 9am (72h) so weekend orders land on Monday's sheet. Returns whether
+ *  a pull was stored, so the caller can skip the render on weekend days. */
+export async function storeDailyOrders(env: Env): Promise<boolean> {
+  if (!shopifyConfigured(env)) return false;
   const now = new Date();
-  const from = new Date(now.getTime() - 24 * 3600_000).toISOString();
+  // Day of week in AEST (0 = Sunday … 6 = Saturday)
+  const aestDay = new Date(now.getTime() + 10 * 3600_000).getUTCDay();
+  if (aestDay === 6 || aestDay === 0) {
+    await clog(env, "Daily gangsheet pull skipped: weekend (covered by Monday's pull)");
+    return false;
+  }
+  const windowHours = aestDay === 1 ? 72 : 24;
+  const from = new Date(now.getTime() - windowHours * 3600_000).toISOString();
   const to = now.toISOString();
   try {
     const { csv, orders, items } = await pullWindow(env, from, to);
@@ -137,7 +148,9 @@ export async function storeDailyOrders(env: Env): Promise<void> {
       customMetadata: { orders: String(orders), items: String(items), pulledAt: to },
     });
     await clog(env, `Daily gangsheet pull stored: ${date} — ${orders} orders, ${items} line items`);
+    return true;
   } catch (error) {
     await cerr(env, "Daily gangsheet pull failed:", error);
+    return false;
   }
 }

@@ -431,7 +431,8 @@ export default {
         ctx.waitUntil(refreshMetaTokenIfNeeded(env));
         break;
       case "0 23 * * *":
-        ctx.waitUntil(storeDailyOrders(env).then(() => renderDailyGangsheet(env)));
+        // Weekends (AEST) store nothing — skip the render too.
+        ctx.waitUntil(storeDailyOrders(env).then((stored) => (stored ? renderDailyGangsheet(env) : undefined)));
         break;
       case "*/10 * * * *":
         ctx.waitUntil(autoDraftEmails(env));
