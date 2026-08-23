@@ -571,7 +571,14 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
         setLogs((prev) => [...prev, `Shopify pull: ${data.orders} orders, no printable items in range`]);
         return;
       }
-      const label = pullFrom || pullTo ? `Orders_${pullFrom || "start"}_${pullTo || "now"}` : "Orders_last24h";
+      // Name the sheet by the order-number range in the pull (matching the
+      // auto-daily and order-range pulls) rather than the picked times.
+      const range = orderRange(data.csv);
+      const label = range
+        ? `Orders_${range.start}-${range.end}`
+        : pullFrom || pullTo
+          ? `Orders_${pullFrom || "start"}_${pullTo || "now"}`
+          : "Orders_last24h";
       enqueueCsv(label, data.csv, `Shopify pull — ${data.orders} orders, ${data.items} items`);
     } catch {
       setLogs((prev) => [...prev, "Shopify pull failed: network error"]);

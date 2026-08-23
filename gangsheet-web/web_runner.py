@@ -151,7 +151,9 @@ def _measure_image_items(items):
     and get no tier, so they stay a grid-sized tag in place."""
     margin = CUSTOM_IMAGE_BOX_MARGIN_MM * config.MM_TO_PTS
     for item in items:
-        if item.get('type') != 'image':
+        # Only customer-downloaded artwork (has image_url) gets box tiers;
+        # bundled images like the TEST PRINT logo keep their own cell size.
+        if item.get('type') != 'image' or not item.get('image_url'):
             continue
         path = item.get('image_path')
         if not path or not os.path.exists(path):
