@@ -337,8 +337,17 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
     pulledAt: string;
   } | null>(null);
   const [pulling, setPulling] = useState(false);
-  const [pullFrom, setPullFrom] = useState("");
-  const [pullTo, setPullTo] = useState("");
+  // Default the range pickers to the 9am-to-9am window (yesterday 9:00 → today
+  // 9:00 local) so the time part starts at 09:00 rather than whenever the page
+  // was opened.
+  const nineAm = (daysAgo: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T09:00`;
+  };
+  const [pullFrom, setPullFrom] = useState(() => nineAm(1));
+  const [pullTo, setPullTo] = useState(() => nineAm(0));
   const [pullOrderFrom, setPullOrderFrom] = useState("");
   const [pullOrderTo, setPullOrderTo] = useState("");
 
