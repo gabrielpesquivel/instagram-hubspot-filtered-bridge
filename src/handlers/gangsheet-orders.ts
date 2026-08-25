@@ -1,6 +1,12 @@
 import type { Env } from "../types";
 import { isAuthenticated, jsonResponse } from "../utils/auth";
-import { fetchGangsheetRows, fetchGangsheetRowsByOrderRange, shopifyConfigured } from "../services/shopify-api";
+import {
+  fetchGangsheetRows,
+  fetchGangsheetRowsByOrderRange,
+  orderRangeForWindow,
+  shopifyConfigured,
+  windowForOrderRange,
+} from "../services/shopify-api";
 import { clog, cerr } from "../services/logger";
 
 // Daily Shopify order pull for the gangsheet generator — replaces the manual
@@ -93,6 +99,42 @@ export async function handlePullOrders(request: Request, env: Env): Promise<Resp
   } catch (error) {
     await cerr(env, "Gangsheet order pull error:", error);
     return jsonResponse({ error: error instanceof Error ? error.message : "Order pull failed" }, 502);
+  }
+}
+
+// GET /api/gangsheet/preview — cheap lookup powering the dashboard's
+// time↔order-number sync. ?from=<ISO>&to=<ISO> returns the first/last order
+// numbers in the window; ?fromOrder=<num>&toOrder=<num> returns the two orders'
+// createdAt timestamps. No line items are fetched.
+export async function handlePullPreview(request: Request, env: Env): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+  if (!shopifyConfigured(env)) {
+    return jsonResponse({ error: "Shopify is not configured" }, 503);
+  }
+  const params = new URL(request.url).searchParams;
+  try {
+    if (params.get("fromOrder") || params.get("toOrder")) {
+      const lo = Number(params.get("fromOrder"));
+      const hi = Number(params.get("toOrder"));
+      if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo <= 0 || hi <= 0) {
+        return jsonResponse({ error: "Invalid order number range" }, 400);
+      }
+      return jsonResponse(await windowForOrderRange(env, lo, hi));
+    }
+    const from = params.get("from") || "";
+    const to = params.get("to") || "";
+    if (Number.isNaN(Date.parse(from)) || Number.isNaN(Date.parse(to)) || Date.parse(from) >= Date.parse(to)) {
+      return jsonResponse({ error: "Invalid from/to range" }, 400);
+    }
+    const range = await orderRangeForWindow(env, from, to);
+    if (!range) return jsonResponse({ error: "No orders in range" }, 404);
+    return jsonResponse(range);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Preview failed";
+    if (message.includes("not found")) return jsonResponse({ error: message }, 404);
+    return jsonResponse({ error: message }, 502);
   }
 }
 

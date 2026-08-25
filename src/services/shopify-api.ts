@@ -315,6 +315,44 @@ async function orderCreatedAt(env: Env, orderNumber: number): Promise<string> {
   return node.createdAt;
 }
 
+/** First and last order numbers created in [from, to) — a cheap preview for the
+ *  dashboard's time↔order-number sync (two 1-order queries, no line items).
+ *  Returns null when the window contains no orders. */
+export async function orderRangeForWindow(
+  env: Env,
+  fromISO: string,
+  toISO: string
+): Promise<{ fromOrder: number; toOrder: number } | null> {
+  const q = `created_at:>='${fromISO}' created_at:<'${toISO}'`;
+  const one = `query($q: String!, $rev: Boolean!) {
+    orders(first: 1, query: $q, sortKey: CREATED_AT, reverse: $rev) { edges { node { name } } }
+  }`;
+  type Resp = { orders: { edges: { node: { name: string } }[] } };
+  const [first, last] = await Promise.all([
+    adminGraphQL<Resp>(env, one, { q, rev: false }),
+    adminGraphQL<Resp>(env, one, { q, rev: true }),
+  ]);
+  const lo = Number(first.orders.edges[0]?.node.name.replace(/^#/, ""));
+  const hi = Number(last.orders.edges[0]?.node.name.replace(/^#/, ""));
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+  return { fromOrder: lo, toOrder: hi };
+}
+
+/** createdAt timestamps of two endpoint orders — the inverse preview (order
+ *  numbers → time window). Throws when either order can't be found. */
+export async function windowForOrderRange(
+  env: Env,
+  fromOrder: number,
+  toOrder: number
+): Promise<{ from: string; to: string }> {
+  const [lo, hi] = fromOrder <= toOrder ? [fromOrder, toOrder] : [toOrder, fromOrder];
+  const [loCreated, hiCreated] = await Promise.all([
+    orderCreatedAt(env, lo),
+    lo === hi ? orderCreatedAt(env, lo) : orderCreatedAt(env, hi),
+  ]);
+  return { from: loCreated, to: hiCreated };
+}
+
 /** Printable line rows for an inclusive order-number range. Shopify has no
  *  order-number range filter, but numbers are assigned in creation order, so
  *  the two endpoint orders' createdAt bracket the whole range: pull that date

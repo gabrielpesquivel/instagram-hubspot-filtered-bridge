@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type DragEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ThemeToggle } from "./ThemeToggle";
 
 interface SheetJob {
@@ -292,6 +292,14 @@ function orderRange(csv: string): { start: number; end: number } | null {
 
 let nextJobId = 1;
 
+// ISO timestamp → the local-time string a datetime-local input expects.
+function isoToLocalInput(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 const pullBtnStyle: CSSProperties = {
   padding: "0.45rem 0.9rem",
   borderRadius: 6,
@@ -325,7 +333,6 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
   const [ready, setReady] = useState(false);
   const [jobs, setJobs] = useState<SheetJob[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
-  const [dragOver, setDragOver] = useState(false);
 
   // Shopify order pull (replaces the manual Matrixify CSV export). `daily` is
   // the cron-stored 9am snapshot; the manual pull fetches an arbitrary range.
@@ -350,6 +357,65 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
   const [pullTo, setPullTo] = useState(() => nineAm(0));
   const [pullOrderFrom, setPullOrderFrom] = useState("");
   const [pullOrderTo, setPullOrderTo] = useState("");
+  // The pair the user typed in last is what the shared Pull button uses; the
+  // other pair is auto-filled from /api/gangsheet/preview as an indicator.
+  const [pullSource, setPullSource] = useState<"time" | "orders">("time");
+  const syncTimer = useRef<number | null>(null);
+  const syncSeq = useRef(0);
+
+  // Debounced two-way sync: editing the time window looks up the first/last
+  // order numbers inside it; editing the order numbers looks up their creation
+  // times. A sequence counter drops stale responses from superseded edits.
+  function scheduleSync(run: (seq: number) => Promise<void>) {
+    if (syncTimer.current !== null) window.clearTimeout(syncTimer.current);
+    const seq = ++syncSeq.current;
+    syncTimer.current = window.setTimeout(() => {
+      run(seq).catch(() => { /* preview is best-effort */ });
+    }, 600);
+  }
+
+  function onTimeEdited(from: string, to: string) {
+    setPullFrom(from);
+    setPullTo(to);
+    setPullSource("time");
+    if (!from || !to) return;
+    scheduleSync(async (seq) => {
+      const params = new URLSearchParams({
+        from: new Date(from).toISOString(),
+        to: new Date(to).toISOString(),
+      });
+      const res = await fetch(`/api/gangsheet/preview?${params.toString()}`);
+      if (seq !== syncSeq.current) return;
+      if (!res.ok) {
+        setPullOrderFrom("");
+        setPullOrderTo("");
+        return;
+      }
+      const data = await res.json();
+      if (seq !== syncSeq.current) return;
+      setPullOrderFrom(`#${data.fromOrder}`);
+      setPullOrderTo(`#${data.toOrder}`);
+    });
+  }
+
+  function onOrdersEdited(from: string, to: string) {
+    setPullOrderFrom(from);
+    setPullOrderTo(to);
+    setPullSource("orders");
+    const lo = Number(from.replace(/^#/, "").trim());
+    const hi = Number(to.replace(/^#/, "").trim());
+    if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo <= 0 || hi <= 0) return;
+    scheduleSync(async (seq) => {
+      const params = new URLSearchParams({ fromOrder: String(lo), toOrder: String(hi) });
+      const res = await fetch(`/api/gangsheet/preview?${params.toString()}`);
+      if (seq !== syncSeq.current) return;
+      if (!res.ok) return;
+      const data = await res.json();
+      if (seq !== syncSeq.current) return;
+      setPullFrom(isoToLocalInput(data.from));
+      setPullTo(isoToLocalInput(data.to));
+    });
+  }
 
   function updateJob(id: number, patch: Partial<SheetJob>) {
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
@@ -617,34 +683,23 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
     }
   }
 
-  async function addFiles(files: FileList | File[]) {
-    for (const file of Array.from(files)) {
-      if (!file.name.toLowerCase().endsWith(".csv")) continue;
-      const name =
-        file.name.replace(/\.csv$/i, "").replace(/[^A-Za-z0-9._-]/g, "_") || "sheet";
-      const job: SheetJob = {
-        id: nextJobId++,
-        name,
-        fileName: file.name,
-        status: "queued",
-        detail: "Waiting…",
-      };
-      const csv = await file.arrayBuffer();
-      setJobs((prev) => [...prev, job]);
-      queueRef.current.push({ job, csv });
-    }
-    pumpQueue();
-  }
+  // Fill the order-number fields for the default 9am→9am window on load, so
+  // both pairs match before any edits.
+  useEffect(() => {
+    onTimeEdited(pullFrom, pullTo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  function handleDrop(e: DragEvent) {
-    e.preventDefault();
-    setDragOver(false);
-    if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
-  }
+  // Shared Pull button: the last-edited pair is authoritative.
+  const ordersValid =
+    Number.isInteger(Number(pullOrderFrom.replace(/^#/, "").trim())) &&
+    Number(pullOrderFrom.replace(/^#/, "").trim()) > 0 &&
+    Number.isInteger(Number(pullOrderTo.replace(/^#/, "").trim())) &&
+    Number(pullOrderTo.replace(/^#/, "").trim()) > 0;
 
-  function handleBrowse(e: ChangeEvent<HTMLInputElement>) {
-    if (e.target.files?.length) addFiles(e.target.files);
-    e.target.value = "";
+  function handleSharedPull() {
+    if (pullSource === "orders" && ordersValid) return handlePullOrderRange();
+    return handlePull();
   }
 
   return (
@@ -666,110 +721,121 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
       </header>
 
       <div style={styles.page}>
-        <div style={styles.statusRow}>
-          <span
-            style={{
-              ...styles.statusDot,
-              background: ready ? "#2e7d32" : "#f9a825",
-            }}
-          />
-          <span style={styles.statusText}>{runtimeStatus}</span>
-        </div>
+        <style>{"@keyframes gs-spin { to { transform: rotate(360deg); } }"}</style>
 
-        <div style={styles.jobList}>
-          {daily && (
-            <div style={styles.jobRow}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={styles.jobName}>Today's Shopify orders — {daily.date}</div>
-                <div style={styles.jobDetail}>
-                  {daily.orders} orders, {daily.items} line items (pulled{" "}
-                  {new Date(daily.pulledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})
+        {/* Functional area: blurred with a centered loading animation until the
+            Python runtime is ready. */}
+        <div style={{ position: "relative" }}>
+          <div
+            style={{
+              filter: ready ? "none" : "blur(4px)",
+              pointerEvents: ready ? "auto" : "none",
+              transition: "filter 0.4s ease",
+            }}
+            aria-hidden={!ready}
+          >
+            <div style={styles.jobList}>
+              {daily && (
+                <div style={styles.jobRow}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={styles.jobName}>Today's Shopify orders — {daily.date}</div>
+                    <div style={styles.jobDetail}>
+                      {daily.orders} orders, {daily.items} line items (pulled{" "}
+                      {new Date(daily.pulledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})
+                    </div>
+                  </div>
+                  <button
+                    disabled={!ready || daily.items === 0}
+                    onClick={() => enqueueCsv(`Orders_${daily.date}`, daily.csv, `Daily orders ${daily.date}`)}
+                    style={{ ...pullBtnStyle, opacity: ready && daily.items > 0 ? 1 : 0.5 }}
+                  >
+                    Generate sheet
+                  </button>
+                </div>
+              )}
+              <div style={{ ...styles.jobRow, alignItems: "stretch", flexDirection: "column" as const, gap: "0.75rem" }}>
+                <div style={styles.jobName}>Pull orders from Shopify</div>
+                <div style={styles.pullColumns}>
+                  <div
+                    style={{
+                      ...styles.pullCol,
+                      ...(pullSource === "time" ? styles.pullColActive : {}),
+                    }}
+                  >
+                    <div style={styles.pullColTitle}>Time range</div>
+                    <label style={styles.pullField}>
+                      <span style={styles.pullFieldLabel}>From</span>
+                      <input
+                        type="datetime-local"
+                        value={pullFrom}
+                        onChange={(e) => onTimeEdited(e.target.value, pullTo)}
+                        style={dateInputStyle}
+                      />
+                    </label>
+                    <label style={styles.pullField}>
+                      <span style={styles.pullFieldLabel}>To</span>
+                      <input
+                        type="datetime-local"
+                        value={pullTo}
+                        onChange={(e) => onTimeEdited(pullFrom, e.target.value)}
+                        style={dateInputStyle}
+                      />
+                    </label>
+                  </div>
+                  <div
+                    style={{
+                      ...styles.pullCol,
+                      ...(pullSource === "orders" ? styles.pullColActive : {}),
+                    }}
+                  >
+                    <div style={styles.pullColTitle}>Order numbers</div>
+                    <label style={styles.pullField}>
+                      <span style={styles.pullFieldLabel}>From</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="#12500"
+                        value={pullOrderFrom}
+                        onChange={(e) => onOrdersEdited(e.target.value, pullOrderTo)}
+                        style={{ ...dateInputStyle, width: "6.5rem" }}
+                      />
+                    </label>
+                    <label style={styles.pullField}>
+                      <span style={styles.pullFieldLabel}>To</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="#12560"
+                        value={pullOrderTo}
+                        onChange={(e) => onOrdersEdited(pullOrderFrom, e.target.value)}
+                        style={{ ...dateInputStyle, width: "6.5rem" }}
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <button
+                    disabled={pulling || !ready || (pullSource === "orders" && !ordersValid)}
+                    onClick={handleSharedPull}
+                    style={{
+                      ...pullBtnStyle,
+                      opacity: pulling || !ready || (pullSource === "orders" && !ordersValid) ? 0.5 : 1,
+                    }}
+                  >
+                    {pulling ? "Pulling…" : "Pull orders"}
+                  </button>
                 </div>
               </div>
-              <button
-                disabled={!ready || daily.items === 0}
-                onClick={() => enqueueCsv(`Orders_${daily.date}`, daily.csv, `Daily orders ${daily.date}`)}
-                style={{ ...pullBtnStyle, opacity: ready && daily.items > 0 ? 1 : 0.5 }}
-              >
-                Generate sheet
-              </button>
+            </div>
+          </div>
+
+          {!ready && (
+            <div style={styles.loadingOverlay}>
+              <span style={styles.loadingSpinner} />
+              <span style={styles.loadingText}>{runtimeStatus}</span>
             </div>
           )}
-          <div style={styles.jobRow}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={styles.jobName}>Pull orders from Shopify</div>
-              <div style={{ ...styles.jobDetail, display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                <input type="datetime-local" value={pullFrom} onChange={(e) => setPullFrom(e.target.value)} style={dateInputStyle} />
-                <span>to</span>
-                <input type="datetime-local" value={pullTo} onChange={(e) => setPullTo(e.target.value)} style={dateInputStyle} />
-                <span style={{ opacity: 0.7 }}>(blank = last 24 hours)</span>
-              </div>
-            </div>
-            <button
-              disabled={pulling || !ready}
-              onClick={handlePull}
-              style={{ ...pullBtnStyle, opacity: pulling || !ready ? 0.5 : 1 }}
-            >
-              {pulling ? "Pulling…" : "Pull orders"}
-            </button>
-          </div>
-          <div style={styles.jobRow}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={styles.jobName}>Pull order number range from Shopify</div>
-              <div style={{ ...styles.jobDetail, display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="#12500"
-                  value={pullOrderFrom}
-                  onChange={(e) => setPullOrderFrom(e.target.value)}
-                  style={{ ...dateInputStyle, width: "6.5rem" }}
-                />
-                <span>to</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="#12560"
-                  value={pullOrderTo}
-                  onChange={(e) => setPullOrderTo(e.target.value)}
-                  style={{ ...dateInputStyle, width: "6.5rem" }}
-                />
-                <span style={{ opacity: 0.7 }}>(inclusive, both required)</span>
-              </div>
-            </div>
-            <button
-              disabled={pulling || !ready || !pullOrderFrom.trim() || !pullOrderTo.trim()}
-              onClick={handlePullOrderRange}
-              style={{ ...pullBtnStyle, opacity: pulling || !ready || !pullOrderFrom.trim() || !pullOrderTo.trim() ? 0.5 : 1 }}
-            >
-              {pulling ? "Pulling…" : "Pull orders"}
-            </button>
-          </div>
         </div>
-
-        <label
-          style={{
-            ...styles.dropZone,
-            ...(dragOver ? styles.dropZoneActive : {}),
-            opacity: ready ? 1 : 0.6,
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-        >
-          <input
-            type="file"
-            accept=".csv"
-            multiple
-            onChange={handleBrowse}
-            style={{ display: "none" }}
-          />
-          <p style={styles.dropTitle}>Drop Shopify order CSV files here</p>
-          <p style={styles.dropSub}>or click to browse — runs entirely in your browser</p>
-        </label>
 
         {jobs.length > 0 && (
           <div style={styles.jobList}>
@@ -884,35 +950,68 @@ const styles: Record<string, React.CSSProperties> = {
     margin: "0 auto",
     padding: "1.5rem 1rem",
   },
-  statusRow: {
+  loadingOverlay: {
+    position: "absolute" as const,
+    inset: 0,
+    display: "flex",
+    flexDirection: "column" as const,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "0.75rem",
+    zIndex: 10,
+  },
+  loadingSpinner: {
+    width: "42px",
+    height: "42px",
+    borderRadius: "50%",
+    border: "4px solid var(--border)",
+    borderTopColor: "#2e7d32",
+    animation: "gs-spin 0.9s linear infinite",
+  },
+  loadingText: {
+    fontSize: "0.9rem",
+    fontWeight: 600,
+    color: "var(--text)",
+    background: "var(--surface)",
+    padding: "0.35rem 0.9rem",
+    borderRadius: "999px",
+    boxShadow: "0 2px 8px var(--shadow)",
+  },
+  pullColumns: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "0.75rem",
+  },
+  pullCol: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "0.5rem",
+    padding: "0.6rem 0.75rem",
+    border: "1px solid var(--border)",
+    borderRadius: "8px",
+  },
+  pullColActive: {
+    borderColor: "#2e7d32",
+    boxShadow: "0 0 0 1px #2e7d32 inset",
+  },
+  pullColTitle: {
+    fontSize: "0.75rem",
+    fontWeight: 700,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.04em",
+    color: "var(--text-muted)",
+  },
+  pullField: {
     display: "flex",
     alignItems: "center",
     gap: "0.5rem",
-    marginBottom: "1rem",
   },
-  statusDot: {
-    width: "10px",
-    height: "10px",
-    borderRadius: "50%",
+  pullFieldLabel: {
+    fontSize: "0.8rem",
+    color: "var(--text-muted)",
+    width: "2.4rem",
     flexShrink: 0,
   },
-  statusText: { fontSize: "0.85rem", color: "var(--text-muted)" },
-  dropZone: {
-    display: "block",
-    border: "2px dashed #bbb",
-    borderRadius: "8px",
-    background: "var(--surface)",
-    padding: "3rem 1rem",
-    textAlign: "center" as const,
-    cursor: "pointer",
-    transition: "border-color 0.15s, background 0.15s",
-  },
-  dropZoneActive: {
-    borderColor: "#333",
-    background: "var(--surface-2)",
-  },
-  dropTitle: { margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--text)" },
-  dropSub: { margin: "0.5rem 0 0", fontSize: "0.85rem", color: "var(--text-muted)" },
   jobList: {
     marginTop: "1.25rem",
     background: "var(--surface)",

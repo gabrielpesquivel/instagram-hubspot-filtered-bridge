@@ -77,6 +77,7 @@ import {
 } from "./handlers/shopify-actions";
 import {
   handlePullOrders,
+  handlePullPreview,
   handleGetDailyOrders,
   storeDailyOrders,
 } from "./handlers/gangsheet-orders";
@@ -362,6 +363,9 @@ export default {
     }
 
     // Gangsheet order pull (replaces the Matrixify CSV export)
+    if (path === "/api/gangsheet/preview" && request.method === "GET") {
+      return handlePullPreview(request, env);
+    }
     if (path === "/api/gangsheet/orders" && request.method === "GET") {
       return handlePullOrders(request, env);
     }
