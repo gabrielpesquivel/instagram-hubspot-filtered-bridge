@@ -11,17 +11,17 @@ interface ToolPickerProps {
 export function ToolPicker({ onSelect, onLogout }: ToolPickerProps) {
   return (
     <div style={styles.container}>
-      {/* Typical header: logo + tabs inline, theme + logout on the right */}
+      {/* Header: gangsheet button left, logo centered, customer support right */}
       <header style={styles.header}>
-        <img src="/logo.png" alt="BootInk" style={styles.logo} />
-        <nav style={styles.tabBar}>
+        <div style={styles.headerLeft}>
           <button style={styles.tab} onClick={() => onSelect("gangsheet")}>
             Gangsheet Generator
           </button>
           <button style={styles.tab} onClick={() => onSelect("support")}>
             Customer Support
           </button>
-        </nav>
+        </div>
+        <img src="/logo.png" alt="BootInk" style={styles.logo} />
         <div style={styles.headerRight}>
           <ThemeToggle />
           <button onClick={onLogout} style={styles.logoutBtn}>
@@ -65,7 +65,8 @@ const styles: Record<string, React.CSSProperties> = {
     boxSizing: "border-box" as const,
   },
   header: {
-    display: "flex",
+    display: "grid",
+    gridTemplateColumns: "1fr auto 1fr",
     alignItems: "center",
     gap: "1.5rem",
     maxWidth: "1100px",
@@ -78,8 +79,10 @@ const styles: Record<string, React.CSSProperties> = {
     height: "auto",
     flexShrink: 0,
   },
-  tabBar: {
+  headerLeft: {
     display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-start",
     gap: "0.75rem",
   },
   tab: {
@@ -95,9 +98,9 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: "inherit",
   },
   headerRight: {
-    marginLeft: "auto",
     display: "flex",
     alignItems: "center",
+    justifyContent: "flex-end",
     gap: "0.6rem",
     flexShrink: 0,
   },
