@@ -40,6 +40,12 @@ export function ToolPicker({ onSelect, onLogout }: ToolPickerProps) {
 
         {/* Right: daily digest + to-do checklist */}
         <section style={styles.right}>
+          {/* Invisible copy of the left column's title block so the digest
+              card top lines up with the calendar's "This week" row */}
+          <div style={{ visibility: "hidden" }} aria-hidden="true">
+            <h2 style={styles.colTitle}>&nbsp;</h2>
+            <p style={styles.colSub}>&nbsp;</p>
+          </div>
           <DigestCard />
           <TodoList />
         </section>
