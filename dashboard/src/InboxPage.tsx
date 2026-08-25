@@ -18,10 +18,13 @@ export function InboxPage({ onBack, onLogout }: InboxPageProps) {
     <div style={styles.wrapper}>
       <header style={styles.topBar}>
         <div style={styles.topBarInner}>
-          <button onClick={onBack} style={styles.ghostBtn}>
-            ← Tools
-          </button>
-          <img src="/logo.png" alt="BootInk" style={styles.logo} />
+          <img
+            src="/logo.png"
+            alt="BootInk"
+            style={styles.logo}
+            onClick={onBack}
+            title="Back to tools"
+          />
           <span style={styles.title}>Customer Support</span>
           <div style={styles.right}>
             <button onClick={() => setSettingsOpen(true)} style={styles.ghostBtn} title="Channels & settings">
@@ -70,7 +73,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: "56px",
     gap: "0.75rem",
   },
-  logo: { height: "30px", width: "auto" },
+  logo: { height: "30px", width: "auto", cursor: "pointer" },
   title: {
     position: "absolute",
     left: "50%",

@@ -8,7 +8,7 @@ import { showActions } from "./action";
 // branches on `channel`.
 
 type Channel = "instagram" | "email";
-type Filter = "all" | Channel;
+type Filter = Channel;
 // IG threads come from two sources: "store" = webhook-approved conversation in
 // the Durable Object; "pull" = live unread from the Graph Conversations API.
 type Source = "store" | "pull";
@@ -28,6 +28,7 @@ interface InboxItem {
   language?: string;
   isVerified?: boolean; // IG pull flag
   isVip?: boolean; // IG pull flag (verified or high-follower)
+  automated?: boolean; // email: payout/notification/marketing, not a customer
 }
 
 type Selected = { channel: Channel; id: string; source?: Source; conversationId?: string };
@@ -101,10 +102,33 @@ interface IgSummary {
 
 interface EmailSummary {
   threadId: string;
+  from: string;
   fromName: string;
   subject: string;
   date: string;
   snippet: string;
+  automated: boolean;
+}
+
+// Flag emails that aren't real customer inquiries — payout notices, platform
+// notifications, marketing blasts — by sender address/domain and telltale
+// subject/snippet phrases. Purely a visual triage aid; false negatives are
+// harmless and false positives still show (just tinted orange).
+function isAutomatedEmail(from: string, subject: string, snippet: string): boolean {
+  const addr = extractEmail(from);
+  // Shopify relays the website contact form through its own domains, so those
+  // are real customers — only Shopify's payout notifications get flagged.
+  if (/@(?:[a-z0-9-]+\.)*(shopify|shopifyemail)\.[a-z.]+$/i.test(addr)) {
+    return /payout/i.test(subject) || /payout/i.test(snippet);
+  }
+  const fromPat =
+    /(no-?_?reply|do-?not-?reply|mailer-daemon|postmaster|notifications?@|alerts?@|payouts?@|billing@|invoic(e|ing)@|receipts?@|newsletters?@|marketing@|promo(tions)?@|news@|updates?@)/i;
+  const domainPat =
+    /@(?:[a-z0-9-]+\.)*(paypal|stripe|starshipit|xero|facebookmail|instagram|meta|canva|google|linkedin|tiktok|klaviyo|mailchimp)\.[a-z.]+$/i;
+  const subjPat =
+    /(payout|payment (?:sent|received|processed)|invoice|receipt\b|statement\b|verification code|verify your|security alert|password reset|confirm your (?:email|subscription)|newsletter|unsubscribe|% ?off|sale (?:ends|starts)|shipping label|billing)/i;
+  const snipPat = /unsubscribe|view (?:this email )?in (?:your )?browser|manage (?:your )?preferences/i;
+  return fromPat.test(addr) || domainPat.test(addr) || subjPat.test(subject) || snipPat.test(snippet);
 }
 
 interface ShopifyOrder {
@@ -168,7 +192,7 @@ function buildEditorHtml(marked: string): string {
 }
 
 export function Inbox() {
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>("email");
   const [search, setSearch] = useState("");
 
   const [igConvos, setIgConvos] = useState<IgSummary[]>([]);
@@ -177,6 +201,10 @@ export function Inbox() {
   const [pending, setPending] = useState<PendingItem[]>([]);
   const [emailConnected, setEmailConnected] = useState<boolean | null>(null);
   const [emailAddress, setEmailAddress] = useState<string>("");
+  // Per-channel first-load flags — the list shows a blurred loading overlay
+  // until the initial fetch for the active channel settles.
+  const [igLoaded, setIgLoaded] = useState(false);
+  const [emailLoaded, setEmailLoaded] = useState(false);
 
   const [selected, setSelected] = useState<Selected | null>(null);
   const [igMessages, setIgMessages] = useState<IgMessage[]>([]);
@@ -252,37 +280,61 @@ export function Inbox() {
     } catch { /* ignore — IG may be disconnected */ }
   }, []);
 
+  // Threads marked done/replied recently. Gmail's `is:unread` search index is
+  // eventually consistent, so a poll landing right after a Done can still list
+  // the thread — it vanished locally then popped back. Suppress re-adds for a
+  // grace window; by then Gmail agrees it's read.
+  const dismissedRef = useRef<Map<string, number>>(new Map());
+  const DISMISS_GRACE_MS = 10 * 60 * 1000;
+
+  function dismissThread(threadId: string) {
+    dismissedRef.current.set(threadId, Date.now());
+    setEmailThreads((p) => p.filter((t) => t.threadId !== threadId));
+  }
+
   const fetchEmail = useCallback(async () => {
     try {
       const res = await fetch("/api/email/threads");
       if (res.ok) {
         const data = await res.json();
+        const cutoff = Date.now() - DISMISS_GRACE_MS;
         setEmailThreads(
-          (data.threads || []).map((t: any) => ({
-            threadId: t.threadId,
-            fromName: t.fromName,
-            subject: t.subject,
-            date: t.date,
-            snippet: t.snippet,
-          }))
+          (data.threads || [])
+            .filter((t: any) => {
+              const at = dismissedRef.current.get(t.threadId);
+              return !(at && at > cutoff);
+            })
+            .map((t: any) => ({
+              threadId: t.threadId,
+              from: t.from || "",
+              fromName: t.fromName,
+              subject: t.subject,
+              date: t.date,
+              snippet: t.snippet,
+              automated: isAutomatedEmail(t.from || "", t.subject || "", t.snippet || ""),
+            }))
         );
       }
     } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Initial load + email connection probe
   useEffect(() => {
-    fetchIg();
     fetchPending();
-    fetchIgUnread();
+    Promise.allSettled([fetchIg(), fetchIgUnread()]).then(() => setIgLoaded(true));
     fetch("/api/email/connection")
       .then((r) => r.json())
       .then((c) => {
         setEmailConnected(!!c.connected);
         setEmailAddress(c.email || "");
-        if (c.connected) fetchEmail();
+        if (c.connected) fetchEmail().finally(() => setEmailLoaded(true));
+        else setEmailLoaded(true);
       })
-      .catch(() => setEmailConnected(false));
+      .catch(() => {
+        setEmailConnected(false);
+        setEmailLoaded(true);
+      });
   }, [fetchIg, fetchPending, fetchEmail, fetchIgUnread]);
 
   // Live IG updates via the DMState WebSocket; slow poll for email (no push).
@@ -561,8 +613,9 @@ export function Inbox() {
             ...p,
             { fromUs: true, fromName: "You", text, date: new Date().toISOString() },
           ]);
-          // Sent threads drop out of the unread queue.
-          setEmailThreads((p) => p.filter((t) => t.threadId !== selected.id));
+          // Sent threads drop out of the unread queue (and stay out even if a
+          // poll races Gmail's read-state update).
+          dismissThread(selected.id);
           if (body.amendment) showAmendment(body.amendment);
         } else {
           toast(body.error || "Email send failed");
@@ -629,9 +682,17 @@ export function Inbox() {
       // (without this it dropped locally but came back on the next poll/refresh).
       const threadId = selected.id;
       fetch(`/api/email/threads/${encodeURIComponent(threadId)}/done`, { method: "POST" }).catch(() => {});
-      setEmailThreads((p) => p.filter((t) => t.threadId !== threadId));
+      dismissThread(threadId);
     }
     setSelected(null);
+  }
+
+  // One-click removal for automated/non-support emails (orange cards) straight
+  // from the list — marks the Gmail thread read without opening it.
+  function quickRemove(threadId: string) {
+    fetch(`/api/email/threads/${encodeURIComponent(threadId)}/done`, { method: "POST" }).catch(() => {});
+    dismissThread(threadId);
+    if (selected?.channel === "email" && selected.id === threadId) setSelected(null);
   }
 
   // Save (or clear) an agent's description for one email image, optimistically.
@@ -722,6 +783,7 @@ export function Inbox() {
       at: ts(t.date),
       atLabel: relTime(ts(t.date)),
       unread: true, // email list is unread-only
+      automated: t.automated,
     });
   }
 
@@ -731,7 +793,7 @@ export function Inbox() {
 
   const q = search.trim().toLowerCase();
   const visible = recent
-    .filter((i) => filter === "all" || i.channel === filter)
+    .filter((i) => i.channel === filter)
     .filter(
       (i) =>
         !q ||
@@ -741,7 +803,8 @@ export function Inbox() {
     )
     .sort((a, b) => b.at - a.at);
 
-  const showApproval = (filter === "all" || filter === "instagram") && pending.length > 0;
+  const showApproval = filter === "instagram" && pending.length > 0;
+  const channelLoading = filter === "email" ? !emailLoaded : !igLoaded;
   const igCount = recent.filter((i) => i.channel === "instagram").length;
   const emailCount = recent.filter((i) => i.channel === "email").length;
 
@@ -753,9 +816,8 @@ export function Inbox() {
       <aside style={styles.sidebar}>
         <div style={styles.filters}>
           {([
-            ["all", "All", igCount + emailCount],
-            ["instagram", "Instagram", igCount],
             ["email", "Email", emailCount],
+            ["instagram", "Instagram", igCount],
           ] as [Filter, string, number][]).map(([key, label, count]) => (
             <button
               key={key}
@@ -779,7 +841,14 @@ export function Inbox() {
           style={styles.search}
         />
 
-        <div style={styles.list}>
+        <div style={{ ...styles.list, position: "relative" }}>
+          <style>{"@keyframes ib-spin { to { transform: rotate(360deg); } }"}</style>
+          {channelLoading && (
+            <div style={styles.listLoading}>
+              <span style={styles.listSpinner} />
+              <span style={styles.listLoadingText}>Loading…</span>
+            </div>
+          )}
           {showApproval && (
             <>
               <div style={styles.sectionLabel}>Needs approval</div>
@@ -828,9 +897,11 @@ export function Inbox() {
 
           {visible.length === 0 && !showApproval ? (
             <div style={styles.empty}>
-              {filter === "email" && emailConnected === false
-                ? "Gmail not connected"
-                : "Nothing here"}
+              {channelLoading
+                ? ""
+                : filter === "email" && emailConnected === false
+                  ? "Gmail not connected"
+                  : "Nothing here"}
             </div>
           ) : (
             visible.map((i) => {
@@ -843,6 +914,7 @@ export function Inbox() {
                     ...styles.itemCard,
                     ...(active ? styles.itemCardActive : {}),
                     ...(i.unread && !active ? styles.itemCardUnread : {}),
+                    ...(i.automated ? styles.itemCardAutomated : {}),
                   }}
                 >
                   <div style={styles.itemTop}>
@@ -850,11 +922,27 @@ export function Inbox() {
                       <span style={i.channel === "instagram" ? styles.chDotIg : styles.chDotEmail} />
                       {i.title}
                     </span>
-                    <span style={styles.itemTime}>{i.atLabel}</span>
+                    <span style={styles.itemTime}>
+                      {i.atLabel}
+                      {i.automated && (
+                        <span
+                          role="button"
+                          title="Not customer support — remove"
+                          style={styles.quickRemoveBtn}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            quickRemove(i.id);
+                          }}
+                        >
+                          ✕
+                        </span>
+                      )}
+                    </span>
                   </div>
                   {i.subtitle && <div style={styles.itemSubject}>{i.subtitle}</div>}
                   <div style={styles.itemSnippet}>{i.snippet}</div>
                   <div style={styles.itemBadges}>
+                    {i.automated && <span style={styles.automatedBadge}>Not customer support</span>}
                     {i.isVerified && <span style={styles.vipBadge}>✔ verified</span>}
                     {i.isVip && !i.isVerified && <span style={styles.vipBadge}>VIP</span>}
                     {i.language && <span style={styles.langBadge}>{i.language}</span>}
@@ -1179,6 +1267,28 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   list: { flex: 1, overflowY: "auto", padding: "0 0.5rem 1rem", minHeight: 0 },
+  listLoading: {
+    position: "absolute",
+    inset: 0,
+    zIndex: 5,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "0.6rem",
+    backdropFilter: "blur(4px)",
+    WebkitBackdropFilter: "blur(4px)",
+    background: "color-mix(in srgb, var(--surface) 40%, transparent)",
+  },
+  listSpinner: {
+    width: "32px",
+    height: "32px",
+    borderRadius: "50%",
+    border: "3px solid var(--border)",
+    borderTopColor: "#2e7d32",
+    animation: "ib-spin 0.9s linear infinite",
+  },
+  listLoadingText: { fontSize: "0.82rem", fontWeight: 600, color: "var(--text-muted)" },
   sectionLabel: {
     fontSize: "0.68rem",
     fontWeight: 700,
@@ -1237,6 +1347,33 @@ const styles: Record<string, React.CSSProperties> = {
   },
   itemCardActive: { background: "var(--surface-3)" },
   itemCardUnread: { background: "var(--surface-2)" },
+  itemCardAutomated: {
+    borderLeft: "3px solid #f57c00",
+    background: "rgba(245, 124, 0, 0.07)",
+  },
+  automatedBadge: {
+    fontSize: "0.65rem",
+    fontWeight: 700,
+    color: "#b45309",
+    background: "rgba(245, 124, 0, 0.14)",
+    border: "1px solid rgba(245, 124, 0, 0.4)",
+    borderRadius: "999px",
+    padding: "0.1rem 0.45rem",
+  },
+  quickRemoveBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "20px",
+    height: "20px",
+    marginLeft: "0.4rem",
+    borderRadius: "50%",
+    border: "1px solid rgba(245, 124, 0, 0.5)",
+    color: "#b45309",
+    fontSize: "0.7rem",
+    lineHeight: 1,
+    cursor: "pointer",
+  },
   itemTop: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "0.5rem" },
   itemTitle: {
     display: "flex", alignItems: "center", gap: "0.4rem",

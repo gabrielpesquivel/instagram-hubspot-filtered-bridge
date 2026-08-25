@@ -706,10 +706,13 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
     <div style={styles.wrapper}>
       <header style={styles.topBar}>
         <div style={styles.topBarInner}>
-          <button onClick={onBack} style={styles.backBtn}>
-            ← Tools
-          </button>
-          <img src="/logo.png" alt="BootInk" style={styles.topBarLogo} />
+          <img
+            src="/logo.png"
+            alt="BootInk"
+            style={styles.topBarLogo}
+            onClick={onBack}
+            title="Back to tools"
+          />
           <span style={styles.topBarTitle}>Gangsheet Generator</span>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <ThemeToggle />
@@ -916,7 +919,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: "56px",
     gap: "0.75rem",
   },
-  topBarLogo: { height: "32px", width: "auto" },
+  topBarLogo: { height: "32px", width: "auto", cursor: "pointer" },
   topBarTitle: {
     position: "absolute" as const,
     left: "50%",
@@ -925,15 +928,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     color: "var(--text)",
     whiteSpace: "nowrap" as const,
-  },
-  backBtn: {
-    padding: "0.4rem 1rem",
-    background: "none",
-    border: "1px solid var(--border)",
-    borderRadius: "4px",
-    cursor: "pointer",
-    fontSize: "0.8rem",
-    color: "var(--text-muted)",
   },
   logoutBtn: {
     marginLeft: "auto",
