@@ -407,6 +407,8 @@ export interface OrderWriteContext {
     variantId: string | null;
     title: string;
     quantity: number;
+    currentQuantity: number;    // after prior refunds/removals — max refundable
+    unitPrice: string;
     properties: { key: string; value: string }[];
   }[];
 }
@@ -454,7 +456,11 @@ const ORDER_CTX_QUERY = `query($q: String!) {
       displayFulfillmentStatus displayFinancialStatus
       currentTotalPriceSet { presentmentMoney { currencyCode } }
       shippingAddress { firstName lastName company address1 address2 city province zip country phone }
-      lineItems(first: 50) { edges { node { id title quantity variant { id } customAttributes { key value } } } }
+      lineItems(first: 50) { edges { node {
+        id title quantity currentQuantity
+        originalUnitPriceSet { presentmentMoney { amount } }
+        variant { id } customAttributes { key value }
+      } } }
     } }
   }
 }`;
@@ -476,7 +482,7 @@ export async function getOrderForWrite(env: Env, name: string): Promise<OrderWri
       displayFulfillmentStatus: string | null; displayFinancialStatus: string | null;
       currentTotalPriceSet: { presentmentMoney: { currencyCode: string } } | null;
       shippingAddress: AddrNode | null;
-      lineItems: { edges: { node: { id: string; title: string; quantity: number; variant: { id: string } | null; customAttributes: { key: string; value: string | null }[] } }[] };
+      lineItems: { edges: { node: { id: string; title: string; quantity: number; currentQuantity: number; originalUnitPriceSet: { presentmentMoney: { amount: string } } | null; variant: { id: string } | null; customAttributes: { key: string; value: string | null }[] } }[] };
     } }[] };
   }>(env, ORDER_CTX_QUERY, { q: `name:#${clean} OR name:${clean}` });
   const node = data.orders.edges[0]?.node;
@@ -500,6 +506,8 @@ export async function getOrderForWrite(env: Env, name: string): Promise<OrderWri
       variantId: e.node.variant?.id || null,
       title: e.node.title,
       quantity: e.node.quantity,
+      currentQuantity: e.node.currentQuantity ?? e.node.quantity,
+      unitPrice: e.node.originalUnitPriceSet?.presentmentMoney.amount || "0",
       properties: (e.node.customAttributes || [])
         .filter((a) => a.value != null && a.value !== "")
         .map((a) => ({ key: a.key, value: a.value as string })),
@@ -701,6 +709,116 @@ export async function refundAmount(
   void currency; // amount is in the order's currency; Shopify validates against the parent txn
   const err = joinUserErrors(data.refundCreate.userErrors);
   if (err) throw new Error(err);
+}
+
+// ── item-based refunds (Shopify-admin style) ─────────────────────────────────
+// The agent picks exact line items + quantities; Shopify's suggestedRefund
+// calculates the correct amount (unit prices, taxes, discounts, prior refunds)
+// and which transaction(s) to refund against — the same engine the admin UI uses.
+
+export interface RefundItemSel { lineItemId: string; quantity: number }
+
+export interface RefundSuggestion {
+  amount: string;
+  currency: string;
+  tax: string;
+  shippingAmount: string;      // shipping included in this suggestion
+  maxShipping: string;         // shipping still refundable on the order
+  transactions: { parentId: string; gateway: string; amount: string }[];
+}
+
+const SUGGESTED_REFUND_QUERY = `query($id: ID!, $refundLineItems: [RefundLineItemInput!], $refundShipping: Boolean) {
+  order(id: $id) {
+    suggestedRefund(refundLineItems: $refundLineItems, refundShipping: $refundShipping) {
+      amountSet { presentmentMoney { amount currencyCode } }
+      totalTaxSet { presentmentMoney { amount } }
+      shipping { amountSet { presentmentMoney { amount } } maximumRefundableSet { presentmentMoney { amount } } }
+      suggestedTransactions { amountSet { presentmentMoney { amount } } gateway parentTransaction { id } }
+    }
+  }
+}`;
+
+/** Ask Shopify what refunding the given line items (+ optionally shipping) is
+ *  worth. Throws when the order is missing or nothing is refundable. */
+export async function suggestRefund(
+  env: Env,
+  orderId: string,
+  items: RefundItemSel[],
+  refundShipping: boolean
+): Promise<RefundSuggestion> {
+  const data = await adminGraphQL<{
+    order: {
+      suggestedRefund: {
+        amountSet: { presentmentMoney: { amount: string; currencyCode: string } };
+        totalTaxSet: { presentmentMoney: { amount: string } };
+        shipping: { amountSet: { presentmentMoney: { amount: string } }; maximumRefundableSet: { presentmentMoney: { amount: string } } } | null;
+        suggestedTransactions: { amountSet: { presentmentMoney: { amount: string } }; gateway: string; parentTransaction: { id: string } | null }[];
+      } | null;
+    } | null;
+  }>(env, SUGGESTED_REFUND_QUERY, {
+    id: orderId,
+    refundLineItems: items.map((i) => ({ lineItemId: i.lineItemId, quantity: i.quantity })),
+    refundShipping,
+  });
+  const s = data.order?.suggestedRefund;
+  if (!s) throw new Error("Shopify could not calculate a refund for this selection");
+  return {
+    amount: s.amountSet.presentmentMoney.amount,
+    currency: s.amountSet.presentmentMoney.currencyCode,
+    tax: s.totalTaxSet.presentmentMoney.amount,
+    shippingAmount: s.shipping?.amountSet.presentmentMoney.amount || "0",
+    maxShipping: s.shipping?.maximumRefundableSet.presentmentMoney.amount || "0",
+    transactions: s.suggestedTransactions
+      .filter((t) => t.parentTransaction)
+      .map((t) => ({ parentId: t.parentTransaction!.id, gateway: t.gateway, amount: t.amountSet.presentmentMoney.amount })),
+  };
+}
+
+/** Refund specific line items (+ optionally shipping) without cancelling the
+ *  order. Amount and target transaction come from suggestedRefund; an explicit
+ *  `amountOverride` replaces the money amount (single-transaction orders only).
+ *  Items are NOT restocked — BootInk products are custom-printed. Returns what
+ *  was refunded. */
+export async function refundOrderItems(
+  env: Env,
+  orderId: string,
+  items: RefundItemSel[],
+  opts: { notify: boolean; note?: string; refundShipping: boolean; amountOverride?: string }
+): Promise<{ amount: string; currency: string }> {
+  const s = await suggestRefund(env, orderId, items, opts.refundShipping);
+  if (!s.transactions.length) throw new Error("No refundable transaction on this order");
+
+  let transactions = s.transactions.map((t) => ({
+    orderId,
+    parentId: t.parentId,
+    gateway: t.gateway,
+    kind: "REFUND",
+    amount: t.amount,
+  }));
+  let amount = s.amount;
+  if (opts.amountOverride) {
+    if (transactions.length > 1) {
+      throw new Error("Manual amount override isn't supported when the order was paid across multiple transactions — use the calculated amount");
+    }
+    transactions = [{ ...transactions[0], amount: opts.amountOverride }];
+    amount = opts.amountOverride;
+  }
+
+  const data = await adminGraphQL<{ refundCreate: { userErrors: { field?: string[]; message: string }[] } }>(
+    env,
+    REFUND_CREATE,
+    { input: {
+      orderId,
+      note: opts.note,
+      notify: opts.notify,
+      refundLineItems: items.map((i) => ({ lineItemId: i.lineItemId, quantity: i.quantity, restockType: "NO_RESTOCK" })),
+      ...(opts.refundShipping ? { shipping: { fullRefund: true } } : {}),
+      transactions,
+    } }
+  );
+  const err = joinUserErrors(data.refundCreate.userErrors);
+  if (err) throw new Error(err);
+  return { amount, currency: s.currency };
 }
 
 const DRAFT_CREATE = `mutation($input: DraftOrderInput!) {

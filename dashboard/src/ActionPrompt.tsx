@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { onActions, type ActionProposal } from "./action";
 import { toast } from "./toast";
 
@@ -278,41 +278,167 @@ function EmailForm({ proposal, onDone }: FormProps) {
 
 // ── cancel_refund ─────────────────────────────────────────────────────────────
 const REASONS = ["CUSTOMER", "INVENTORY", "FRAUD", "DECLINED", "STAFF", "OTHER"];
+interface RefundLI {
+  lineItemId: string;
+  title: string;
+  quantity: number;
+  currentQuantity: number;
+  unitPrice: string;
+  properties?: { key: string; value: string }[];
+}
 function CancelRefundForm({ proposal, onDone }: FormProps) {
   const [order, setOrder] = useState(cleanOrder(proposal.orderNumber || arg(proposal, "order_number")));
   const [mode, setMode] = useState<"cancel" | "refund">("cancel");
   const [reason, setReason] = useState("CUSTOMER");
   const [restock, setRestock] = useState(true);
   const [notify, setNotify] = useState(true);
-  const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Item selection for partial refunds (Shopify-admin style).
+  const [items, setItems] = useState<RefundLI[] | null>(null);
+  const [loadErr, setLoadErr] = useState("");
+  const [sel, setSel] = useState<Record<number, boolean>>({});
+  const [qty, setQty] = useState<Record<number, number>>({});
+  const [refundShipping, setRefundShipping] = useState(false);
+  const [override, setOverride] = useState("");
+
+  // Live amount preview from Shopify's suggestedRefund.
+  const [preview, setPreview] = useState<{ amount: string; currency: string; tax: string } | null>(null);
+  const [previewErr, setPreviewErr] = useState("");
+  const [previewing, setPreviewing] = useState(false);
+  const previewSeq = useRef(0);
+
+  async function load() {
+    if (!order) return;
+    setLoadErr(""); setItems(null); setSel({}); setQty({}); setPreview(null);
+    const res = await fetch(`/api/shopify/actions/order-items?name=${encodeURIComponent(order)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setLoadErr(String(data.error || "Lookup failed")); return; }
+    const lis: RefundLI[] = data.lineItems || [];
+    setItems(lis);
+    const q: Record<number, number> = {};
+    lis.forEach((li, i) => { q[i] = li.currentQuantity ?? li.quantity; });
+    setQty(q);
+  }
+  useEffect(() => { if (order) load(); /* eslint-disable-next-line */ }, []);
+
+  function chosenItems() {
+    if (!items) return [];
+    return items
+      .map((li, i) => ({ li, i }))
+      .filter(({ li, i }) => sel[i] && (li.currentQuantity ?? li.quantity) > 0)
+      .map(({ li, i }) => ({
+        lineItemId: li.lineItemId,
+        quantity: Math.min(li.currentQuantity ?? li.quantity, Math.max(1, qty[i] || 1)),
+      }));
+  }
+
+  // Recalculate the refund amount whenever the selection changes (debounced).
+  useEffect(() => {
+    if (mode !== "refund") return;
+    const chosen = chosenItems();
+    const seq = ++previewSeq.current;
+    if (!chosen.length) { setPreview(null); setPreviewErr(""); setPreviewing(false); return; }
+    setPreviewing(true);
+    const t = setTimeout(async () => {
+      const { ok, data } = await postAction("refund-preview", { orderNumber: order, items: chosen, refundShipping });
+      if (seq !== previewSeq.current) return;
+      setPreviewing(false);
+      if (ok) {
+        setPreview({ amount: String(data.amount), currency: String(data.currency), tax: String(data.tax) });
+        setPreviewErr("");
+      } else {
+        setPreview(null);
+        setPreviewErr(String(data.error || "Could not calculate the refund"));
+      }
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, sel, qty, refundShipping, items, order]);
 
   async function submit() {
     if (!order) return toast("Enter the order number");
-    if (mode === "refund" && !(Number(amount) > 0)) return toast("Enter a refund amount");
+    const chosen = mode === "refund" ? chosenItems() : [];
+    if (mode === "refund" && !chosen.length && !(Number(override) > 0)) {
+      return toast("Select items to refund (or enter a manual amount)");
+    }
     setBusy(true);
     try {
-      const { ok, data } = await postAction("cancel-refund", { orderNumber: order, mode, reason, restock, notify, amount });
+      const { ok, data } = await postAction("cancel-refund", {
+        orderNumber: order, mode, reason, restock, notify,
+        items: chosen,
+        refundShipping,
+        amount: override.trim(),
+      });
       if (ok) {
         const msg = mode === "cancel" ? `cancelled + refunded${starshipitNote(data)}` : `refunded ${data.amount} ${data.currency}`;
         toast(`✓ #${cleanOrder(order)} ${msg}`, "success"); onDone();
       } else toast(String(data.error || "Action failed"));
     } finally { setBusy(false); }
   }
+
   return (
     <div style={styles.body}>
       {arg(proposal, "reason") && <div style={styles.quote}>Reason: “{arg(proposal, "reason")}”</div>}
-      <OrderField value={order} onChange={setOrder} />
+      <div style={styles.row2}>
+        <OrderField value={order} onChange={setOrder} />
+        <button style={styles.loadBtn} onClick={load}>Load items</button>
+      </div>
       <div style={styles.seg}>
         <button style={mode === "cancel" ? styles.segOn : styles.segOff} onClick={() => setMode("cancel")}>Cancel + full refund</button>
         <button style={mode === "refund" ? styles.segOn : styles.segOff} onClick={() => setMode("refund")}>Partial refund</button>
       </div>
+
+      {mode === "refund" && (
+        <>
+          {loadErr && <div style={styles.err}>{loadErr}</div>}
+          {!items && !loadErr && <div style={styles.hint}>Loading order items…</div>}
+          {items && items.length === 0 && <div style={styles.hint}>No line items found.</div>}
+          {items && items.map((li, i) => {
+            const maxQ = li.currentQuantity ?? li.quantity;
+            const gone = maxQ <= 0;
+            const shown = (li.properties || []).filter((p) => !p.key.startsWith("_"));
+            return (
+              <div key={li.lineItemId} style={{ opacity: gone ? 0.5 : 1 }}>
+                <label style={styles.itemRow}>
+                  <input type="checkbox" disabled={gone} checked={!!sel[i]} onChange={(e) => setSel((p) => ({ ...p, [i]: e.target.checked }))} />
+                  {maxQ > 1 ? (
+                    <>
+                      <input type="number" min={1} max={maxQ} value={qty[i] ?? maxQ} style={styles.qty}
+                        onChange={(e) => setQty((p) => ({ ...p, [i]: Math.min(maxQ, Math.max(1, Number(e.target.value) || 1)) }))} />
+                      <span style={{ flex: 1 }}>of {maxQ}× {li.title}</span>
+                    </>
+                  ) : (
+                    <span style={{ flex: 1 }}>{maxQ}× {li.title}{gone && " (already refunded)"}</span>
+                  )}
+                  <span style={styles.priceTag}>{li.unitPrice} ea</span>
+                </label>
+                {shown.length > 0 && (
+                  <div style={styles.props}>
+                    {shown.map((p, j) => <div key={j}>{p.key}: {p.value}</div>)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <Check label="Also refund shipping" checked={refundShipping} onChange={setRefundShipping} />
+          {previewing && <div style={styles.hint}>Calculating refund…</div>}
+          {previewErr && <div style={styles.err}>{previewErr}</div>}
+          {preview && !previewing && (
+            <div style={styles.refundTotal}>
+              Refund total: {preview.amount} {preview.currency}
+              {Number(preview.tax) > 0 && <span style={styles.hint}> (incl. {preview.tax} tax)</span>}
+            </div>
+          )}
+          <Input ph="Override amount (optional — leave blank to use the calculated total)" value={override} onChange={(e) => setOverride(e.target.value)} />
+        </>
+      )}
+
       <label style={styles.fieldLabel}>Reason
         <select style={styles.select} value={reason} onChange={(e) => setReason(e.target.value)}>
           {REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
       </label>
-      {mode === "refund" && <Input ph="Refund amount (e.g. 12.50)" value={amount} onChange={(e) => setAmount(e.target.value)} />}
       {mode === "cancel" && <Check label="Restock items" checked={restock} onChange={setRestock} />}
       <Check label="Notify customer by email" checked={notify} onChange={setNotify} />
       <SubmitRow busy={busy} danger label={mode === "cancel" ? "Cancel & refund order" : "Issue partial refund"} onClick={submit} />
@@ -516,6 +642,8 @@ const styles: Record<string, React.CSSProperties> = {
   check: { display: "flex", alignItems: "center", gap: "0.45rem", fontSize: "0.82rem", color: "var(--text-muted)" },
   itemRow: { display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.83rem", padding: "0.25rem 0" },
   props: { margin: "0 0 0.2rem 1.6rem", fontSize: "0.76rem", color: "var(--text-muted)", lineHeight: 1.5 },
+  priceTag: { fontSize: "0.74rem", color: "var(--text-faint)", whiteSpace: "nowrap" },
+  refundTotal: { fontSize: "0.9rem", fontWeight: 700, color: "#2e7d32" },
   loadBtn: { padding: "0.5rem 0.8rem", background: "var(--surface-2)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "0.8rem", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },
   addBtn: { padding: "0.3rem 0.7rem", background: "#2196f3", color: "#fff", border: "none", borderRadius: "7px", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer" },
   qty: { width: "3rem", padding: "0.3rem", background: "var(--surface-2)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "7px", fontSize: "0.8rem" },

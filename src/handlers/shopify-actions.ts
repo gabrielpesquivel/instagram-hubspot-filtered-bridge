@@ -22,6 +22,9 @@ import {
   updateOrderEmail,
   cancelOrderFull,
   refundAmount,
+  refundOrderItems,
+  suggestRefund,
+  type RefundItemSel,
   createReplacementOrder,
   addItemsToOrder,
   searchProductVariants,
@@ -166,10 +169,21 @@ export async function handleUpdateEmail(request: Request, env: Env): Promise<Res
 }
 
 // ── cancel_refund ────────────────────────────────────────────────────────────
-// Body: { orderNumber, mode: "cancel" | "refund", reason, restock?, notify?, amount? }
+// Body: { orderNumber, mode: "cancel" | "refund", reason, restock?, notify?,
+//         items?: [{lineItemId, quantity}], refundShipping?, amount? }
 //  - mode "cancel": full refund + cancel the order (+ delete StarShipit order)
-//  - mode "refund": partial refund of `amount`, order stays open
+//  - mode "refund" with items: refund those exact line items/quantities (amount
+//    calculated by Shopify via suggestedRefund; `amount` acts as an override)
+//  - mode "refund" without items: legacy fixed-amount refund of `amount`
 const CANCEL_REASONS = new Set(["CUSTOMER", "DECLINED", "FRAUD", "INVENTORY", "STAFF", "OTHER"]);
+
+function asRefundItems(raw: unknown): RefundItemSel[] {
+  return Array.isArray(raw)
+    ? (raw as { lineItemId?: unknown; quantity?: unknown }[])
+        .filter((i) => i && typeof i.lineItemId === "string" && i.lineItemId)
+        .map((i) => ({ lineItemId: String(i.lineItemId), quantity: Math.max(1, Number(i.quantity) || 1) }))
+    : [];
+}
 export async function handleCancelRefund(request: Request, env: Env): Promise<Response> {
   const body = await guard(request, env);
   if (body instanceof Response) return body;
@@ -189,16 +203,58 @@ export async function handleCancelRefund(request: Request, env: Env): Promise<Re
       await clog(env, `Order ${order.name}: cancelled + refunded (restock=${restock})`);
       return jsonResponse({ ok: true, order: order.name, mode, starshipit: ssStatus(env, ss) });
     }
-    // partial refund
+    // partial refund — item-based when a selection is given, else fixed amount
     const amount = String(body.amount || "").trim();
-    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
-      return jsonResponse({ error: "A positive refund amount is required" }, 400);
+    if (amount && (isNaN(Number(amount)) || Number(amount) <= 0)) {
+      return jsonResponse({ error: "Refund amount must be a positive number" }, 400);
+    }
+    const items = asRefundItems(body.items);
+    if (items.length) {
+      const done = await refundOrderItems(env, order.id, items, {
+        notify,
+        note: `Partial refund (${reason})`,
+        refundShipping: body.refundShipping === true,
+        amountOverride: amount || undefined,
+      });
+      await clog(env, `Order ${order.name}: refunded ${items.length} item line(s) — ${done.amount} ${done.currency}`);
+      return jsonResponse({ ok: true, order: order.name, mode, amount: done.amount, currency: done.currency });
+    }
+    if (!amount) {
+      return jsonResponse({ error: "Select items to refund, or enter a refund amount" }, 400);
     }
     await refundAmount(env, order.id, amount, order.currency, { notify, note: `Partial refund (${reason})` });
     await clog(env, `Order ${order.name}: partial refund ${amount} ${order.currency}`);
     return jsonResponse({ ok: true, order: order.name, mode, amount, currency: order.currency });
   } catch (error) {
     await cerr(env, "cancel_refund failed:", error);
+    return jsonResponse({ error: errMsg(error) }, 502);
+  }
+}
+
+// ── refund preview ───────────────────────────────────────────────────────────
+// Body: { orderNumber, items: [{lineItemId, quantity}], refundShipping? }
+// Returns Shopify's calculated refund for the selection (amount incl. tax) so
+// the modal can show the exact figure before the agent commits. No write.
+export async function handleRefundPreview(request: Request, env: Env): Promise<Response> {
+  const body = await guard(request, env);
+  if (body instanceof Response) return body;
+  const order = await loadOrder(env, String(body.orderNumber || ""));
+  if (order instanceof Response) return order;
+  const items = asRefundItems(body.items);
+  if (!items.length) return jsonResponse({ error: "No items selected" }, 400);
+  try {
+    const s = await suggestRefund(env, order.id, items, body.refundShipping === true);
+    return jsonResponse({
+      order: order.name,
+      amount: s.amount,
+      currency: s.currency,
+      tax: s.tax,
+      shippingAmount: s.shippingAmount,
+      maxShipping: s.maxShipping,
+      multiTransaction: s.transactions.length > 1,
+    });
+  } catch (error) {
+    await cerr(env, "refund-preview failed:", error);
     return jsonResponse({ error: errMsg(error) }, 502);
   }
 }
@@ -309,7 +365,15 @@ export async function handleGetOrderItems(request: Request, env: Env): Promise<R
       fulfilled: isFulfilled(ctx),
       cancelled: !!ctx.cancelledAt,
       shippingAddress: ctx.shippingAddress,
-      lineItems: ctx.lineItems.map((li) => ({ variantId: li.variantId, title: li.title, quantity: li.quantity, properties: li.properties })),
+      lineItems: ctx.lineItems.map((li) => ({
+        lineItemId: li.id,
+        variantId: li.variantId,
+        title: li.title,
+        quantity: li.quantity,
+        currentQuantity: li.currentQuantity,
+        unitPrice: li.unitPrice,
+        properties: li.properties,
+      })),
     });
   } catch (error) {
     await cerr(env, "order-items lookup failed:", error);

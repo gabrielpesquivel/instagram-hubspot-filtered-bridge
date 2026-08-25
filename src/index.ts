@@ -69,6 +69,7 @@ import {
   handleUpdateAddress,
   handleUpdateEmail,
   handleCancelRefund,
+  handleRefundPreview,
   handleDuplicateOrder,
   handleAddToOrder,
   handleParseAddress,
@@ -308,6 +309,9 @@ export default {
     }
     if (path === "/api/shopify/actions/cancel-refund" && request.method === "POST") {
       return handleCancelRefund(request, env);
+    }
+    if (path === "/api/shopify/actions/refund-preview" && request.method === "POST") {
+      return handleRefundPreview(request, env);
     }
     if (path === "/api/shopify/actions/duplicate-order" && request.method === "POST") {
       return handleDuplicateOrder(request, env);
