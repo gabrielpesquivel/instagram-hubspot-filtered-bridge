@@ -15,6 +15,7 @@ const fmt = (n: number | null | undefined) => (n === null || n === undefined ? "
 
 export function DigestCard() {
   const [data, setData] = useState<DigestData | null>(null);
+  const [emailsTicked, setEmailsTicked] = useState(false);
 
   useEffect(() => {
     let closed = false;
@@ -33,6 +34,26 @@ export function DigestCard() {
     };
   }, []);
 
+  // Mirror the "Answer emails" tick from TodoList (same per-day localStorage
+  // key). "todo-changed" covers same-tab toggles, "storage" other tabs.
+  useEffect(() => {
+    const read = () => {
+      try {
+        const raw = localStorage.getItem(`todo:${new Date().toISOString().slice(0, 10)}`);
+        setEmailsTicked(raw ? !!JSON.parse(raw).emails : false);
+      } catch {
+        setEmailsTicked(false);
+      }
+    };
+    read();
+    window.addEventListener("todo-changed", read);
+    window.addEventListener("storage", read);
+    return () => {
+      window.removeEventListener("todo-changed", read);
+      window.removeEventListener("storage", read);
+    };
+  }, []);
+
   // Render the card shell immediately with "—" placeholders — a card that pops
   // in after the fetch makes the whole page jump.
   const loading = data === null;
@@ -48,7 +69,11 @@ export function DigestCard() {
       </div>
 
       <div style={{ ...styles.row, opacity: loading ? 0.5 : 1 }}>
-        <Item label="Unread emails" value={fmt(data?.emailUnread ?? null)} color={(data?.emailUnread || 0) > 0 ? "#ff9800" : undefined} />
+        {emailsTicked ? (
+          <Item label="Unread emails" value="✓" color="#2e7d32" />
+        ) : (
+          <Item label="Unread emails" value={fmt(data?.emailUnread ?? null)} color={(data?.emailUnread || 0) > 0 ? "#ff9800" : undefined} />
+        )}
         <Item label="Unread DMs" value={fmt(data?.igUnread ?? null)} color={(data?.igUnread || 0) > 0 ? "#ff9800" : undefined} />
         <Item
           label="Gangsheet"

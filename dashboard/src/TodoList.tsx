@@ -32,6 +32,9 @@ export function TodoList() {
       } catch {
         /* ignore */
       }
+      // Same-tab localStorage writes don't fire "storage" — tell siblings
+      // (DigestCard mirrors the "emails" tick) explicitly.
+      window.dispatchEvent(new Event("todo-changed"));
       return next;
     });
   }

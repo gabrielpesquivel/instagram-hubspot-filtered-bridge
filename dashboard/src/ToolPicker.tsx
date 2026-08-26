@@ -1,4 +1,5 @@
 import { DigestCard } from "./DigestCard";
+import { SiteStatusCard } from "./SiteStatusCard";
 import { FileCalendar } from "./FileCalendar";
 import { TodoList } from "./TodoList";
 import { ThemeToggle } from "./ThemeToggle";
@@ -47,6 +48,7 @@ export function ToolPicker({ onSelect, onLogout }: ToolPickerProps) {
             <p style={styles.colSub}>&nbsp;</p>
           </div>
           <DigestCard />
+          <SiteStatusCard />
           <TodoList />
         </section>
       </div>

@@ -84,6 +84,8 @@ import {
 } from "./handlers/gangsheet-orders";
 import { renderDailyGangsheet } from "./handlers/gangsheet-autorender";
 import { handleDigest } from "./handlers/digest";
+import { handleGetShopReviews, handlePostShopReviews } from "./handlers/shop-reviews";
+import { handleSiteStatus } from "./handlers/site-status";
 import { autoDraftEmails } from "./handlers/email-autodraft";
 import {
   handleGoogleAuthInit,
@@ -389,6 +391,20 @@ export default {
     // Daily digest (dashboard widget)
     if (path === "/api/digest" && request.method === "GET") {
       return handleDigest(request, env);
+    }
+
+    // Shop (shop.app) review stats (home-page card; synced by a local
+    // scraper — shop.app blocks datacenter IPs, see handlers/shop-reviews.ts)
+    if (path === "/api/reviews" && request.method === "GET") {
+      return handleGetShopReviews(request, env);
+    }
+    if (path === "/api/reviews" && request.method === "POST") {
+      return handlePostShopReviews(request, env);
+    }
+
+    // Website status + reviews (home-page card)
+    if (path === "/api/site-status" && request.method === "GET") {
+      return handleSiteStatus(request, env);
     }
 
     // Daily gangsheet file uploads (R2)
