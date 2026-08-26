@@ -31,6 +31,11 @@ export function ToolPicker({ onSelect, onLogout }: ToolPickerProps) {
         </div>
       </header>
 
+      {/* Hero: website health + reviews, full width across both columns */}
+      <div style={styles.hero}>
+        <SiteStatusCard />
+      </div>
+
       <div style={styles.columns}>
         {/* Left: daily gangsheet calendar */}
         <section style={styles.left}>
@@ -39,16 +44,12 @@ export function ToolPicker({ onSelect, onLogout }: ToolPickerProps) {
           <FileCalendar />
         </section>
 
-        {/* Right: daily digest + to-do checklist */}
+        {/* Right: the morning workflow, top to bottom — what's waiting
+            (digest), act on it (to-do), then passive store health (website) */}
         <section style={styles.right}>
-          {/* Invisible copy of the left column's title block so the digest
-              card top lines up with the calendar's "This week" row */}
-          <div style={{ visibility: "hidden" }} aria-hidden="true">
-            <h2 style={styles.colTitle}>&nbsp;</h2>
-            <p style={styles.colSub}>&nbsp;</p>
-          </div>
+          <h2 style={styles.colTitle}>Today's Overview</h2>
+          <p style={styles.colSub}>What's waiting, your checklist and store health</p>
           <DigestCard />
-          <SiteStatusCard />
           <TodoList />
         </section>
       </div>
@@ -115,15 +116,21 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "0.8rem",
     color: "var(--text-muted)",
   },
+  hero: {
+    maxWidth: "1100px",
+    margin: "0 auto",
+  },
   columns: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)",
     gap: "2rem",
     maxWidth: "1100px",
     margin: "0 auto",
-    alignItems: "start",
+    // Stretch both columns to the same height; the file panel inside the
+    // left column flexes to fill, so its bottom lines up with the to-do card.
+    alignItems: "stretch",
   },
-  left: { minWidth: 0 },
+  left: { minWidth: 0, display: "flex", flexDirection: "column" as const },
   right: { minWidth: 0 },
   colTitle: { margin: "0 0 0.25rem", fontSize: "1.25rem", color: "var(--text)" },
   colSub: { margin: "0 0 1rem", fontSize: "0.85rem", color: "var(--text-muted)" },

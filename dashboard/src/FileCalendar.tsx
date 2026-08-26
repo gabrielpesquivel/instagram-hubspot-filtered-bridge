@@ -277,6 +277,8 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column" as const,
     gap: "1rem",
     width: "100%",
+    flex: 1,
+    minHeight: 0,
   },
   header: {
     display: "flex",
@@ -330,7 +332,11 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "10px",
     background: "var(--surface)",
     padding: "1rem",
-    minHeight: "220px",
+    // Fills the stretched column so the panel bottom matches the right
+    // column's last card; long file lists scroll instead of growing.
+    flex: 1,
+    minHeight: "120px",
+    overflowY: "auto" as const,
   },
   panelHead: {
     display: "flex",

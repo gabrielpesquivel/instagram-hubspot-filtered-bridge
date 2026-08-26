@@ -16,6 +16,7 @@ const fmt = (n: number | null | undefined) => (n === null || n === undefined ? "
 export function DigestCard() {
   const [data, setData] = useState<DigestData | null>(null);
   const [emailsTicked, setEmailsTicked] = useState(false);
+  const [dmsTicked, setDmsTicked] = useState(false);
 
   useEffect(() => {
     let closed = false;
@@ -34,15 +35,19 @@ export function DigestCard() {
     };
   }, []);
 
-  // Mirror the "Answer emails" tick from TodoList (same per-day localStorage
-  // key). "todo-changed" covers same-tab toggles, "storage" other tabs.
+  // Mirror the "Answer emails" / "Answer Instagram DMs" ticks from TodoList
+  // (same per-day localStorage key). "todo-changed" covers same-tab toggles,
+  // "storage" other tabs.
   useEffect(() => {
     const read = () => {
       try {
         const raw = localStorage.getItem(`todo:${new Date().toISOString().slice(0, 10)}`);
-        setEmailsTicked(raw ? !!JSON.parse(raw).emails : false);
+        const done = raw ? JSON.parse(raw) : {};
+        setEmailsTicked(!!done.emails);
+        setDmsTicked(!!done.dms);
       } catch {
         setEmailsTicked(false);
+        setDmsTicked(false);
       }
     };
     read();
@@ -57,15 +62,23 @@ export function DigestCard() {
   // Render the card shell immediately with "—" placeholders — a card that pops
   // in after the fetch makes the whole page jump.
   const loading = data === null;
+  // Ticked-off channels count as handled, so finishing the checklist
+  // flips the card to "all clear" even if counts haven't refreshed yet.
   const needsAttention = data
-    ? (data.emailUnread || 0) + (data.igUnread || 0)
+    ? (emailsTicked ? 0 : data.emailUnread || 0) + (dmsTicked ? 0 : data.igUnread || 0)
     : null;
 
   return (
     <div style={styles.card}>
       <div style={styles.header}>
         <span style={styles.title}>Daily digest</span>
-        <span style={styles.date}>{data?.date || " "}</span>
+        <span style={styles.date}>{data?.date
+            ? new Date(`${data.date}T00:00:00`).toLocaleDateString(undefined, {
+                weekday: "short",
+                day: "numeric",
+                month: "short",
+              })
+            :" "}</span>
       </div>
 
       <div style={{ ...styles.row, opacity: loading ? 0.5 : 1 }}>
@@ -74,7 +87,11 @@ export function DigestCard() {
         ) : (
           <Item label="Unread emails" value={fmt(data?.emailUnread ?? null)} color={(data?.emailUnread || 0) > 0 ? "#ff9800" : undefined} />
         )}
-        <Item label="Unread DMs" value={fmt(data?.igUnread ?? null)} color={(data?.igUnread || 0) > 0 ? "#ff9800" : undefined} />
+        {dmsTicked ? (
+          <Item label="Unread DMs" value="✓" color="#2e7d32" />
+        ) : (
+          <Item label="Unread DMs" value={fmt(data?.igUnread ?? null)} color={(data?.igUnread || 0) > 0 ? "#ff9800" : undefined} />
+        )}
         <Item
           label="Gangsheet"
           value={data?.sheetsUploaded == null ? "—" : data.sheetsUploaded > 0 ? "✓" : "✗"}
@@ -107,7 +124,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: "8px",
     boxShadow: "0 2px 8px var(--shadow)",
     padding: "1rem",
-    marginBottom: "1.5rem",
+    marginBottom: "1rem",
   },
   header: {
     display: "flex",

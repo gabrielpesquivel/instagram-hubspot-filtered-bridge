@@ -85,7 +85,7 @@ import {
 import { renderDailyGangsheet } from "./handlers/gangsheet-autorender";
 import { handleDigest } from "./handlers/digest";
 import { handleGetShopReviews, handlePostShopReviews } from "./handlers/shop-reviews";
-import { handleSiteStatus } from "./handlers/site-status";
+import { handleSiteStatus, recordSitePing } from "./handlers/site-status";
 import { autoDraftEmails } from "./handlers/email-autodraft";
 import {
   handleGoogleAuthInit,
@@ -460,6 +460,7 @@ export default {
         break;
       case "*/10 * * * *":
         ctx.waitUntil(autoDraftEmails(env));
+        ctx.waitUntil(recordSitePing(env)); // 24h response-time history
         break;
     }
   },
