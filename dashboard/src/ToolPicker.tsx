@@ -2,6 +2,7 @@ import { DigestCard } from "./DigestCard";
 import { SiteStatusCard } from "./SiteStatusCard";
 import { FileCalendar } from "./FileCalendar";
 import { TodoList } from "./TodoList";
+import { NotesCard } from "./NotesCard";
 import { ThemeToggle } from "./ThemeToggle";
 
 interface ToolPickerProps {
@@ -59,6 +60,11 @@ export function ToolPicker({ onSelect, onLogout }: ToolPickerProps) {
           <DigestCard />
           <TodoList />
         </section>
+      </div>
+
+      {/* Full-width scratchpad under both columns; persists across days */}
+      <div style={styles.notesRow}>
+        <NotesCard />
       </div>
     </div>
   );
@@ -143,6 +149,10 @@ const styles: Record<string, React.CSSProperties> = {
   right: { minWidth: 0, display: "grid", gridTemplateRows: "subgrid", gridRow: "span 3" },
   colTitle: { margin: "0 0 0.25rem", fontSize: "1.25rem", color: "var(--text)" },
   colSub: { margin: 0, fontSize: "0.85rem", color: "var(--text-muted)" },
+  notesRow: {
+    maxWidth: "1100px",
+    margin: "1.5rem auto 0",
+  },
   grid: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",

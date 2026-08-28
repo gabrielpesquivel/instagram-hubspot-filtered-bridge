@@ -85,6 +85,7 @@ import {
 import { renderDailyGangsheet } from "./handlers/gangsheet-autorender";
 import { handleDigest } from "./handlers/digest";
 import { handleGetShopReviews, handlePostShopReviews } from "./handlers/shop-reviews";
+import { handleGetNotes, handlePutNotes } from "./handlers/notes";
 import { handleSiteStatus, recordSitePing } from "./handlers/site-status";
 import { autoDraftEmails } from "./handlers/email-autodraft";
 import {
@@ -405,6 +406,14 @@ export default {
     // Website status + reviews (home-page card)
     if (path === "/api/site-status" && request.method === "GET") {
       return handleSiteStatus(request, env);
+    }
+
+    // Home-page scratchpad notes (persist across days)
+    if (path === "/api/notes" && request.method === "GET") {
+      return handleGetNotes(request, env);
+    }
+    if (path === "/api/notes" && request.method === "PUT") {
+      return handlePutNotes(request, env);
     }
 
     // Daily gangsheet file uploads (R2)
