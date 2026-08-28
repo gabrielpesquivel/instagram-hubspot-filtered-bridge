@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 
-// Fixed daily checklist. Tick state is stored per calendar day in localStorage,
-// so it naturally resets each new day.
+// Fixed daily checklist in the order the work happens each morning. Tick state
+// is stored per calendar day in localStorage, so it naturally resets each new day.
 const TASKS = [
-  { id: "gangsheet", label: "Generate gangsheet" },
-  { id: "dms", label: "Answer Instagram DMs" },
   { id: "emails", label: "Answer emails" },
+  { id: "dms", label: "Answer Instagram DMs" },
+  { id: "gangsheet", label: "Generate gangsheet" },
+  { id: "prints", label: "Print gangsheets" },
 ];
 
 function todayKey(): string {

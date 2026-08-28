@@ -157,6 +157,9 @@ export function FileCalendar() {
 
   return (
     <div style={styles.wrap}>
+      {/* Week nav + day boxes grouped as one block: on the home page grid this
+          is the row shared with the digest card, so their bottoms align. */}
+      <div style={styles.top}>
       <div style={styles.header}>
         <button
           style={styles.navBtn}
@@ -198,6 +201,7 @@ export function FileCalendar() {
             </button>
           );
         })}
+      </div>
       </div>
 
       <div style={styles.panel}>
@@ -272,12 +276,13 @@ export function FileCalendar() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  wrap: {
+  // `contents` dissolves the wrapper so `top` and `panel` land in the parent
+  // grid's shared rows (aligned with the digest card / to-do list).
+  wrap: { display: "contents" },
+  top: {
     display: "flex",
     flexDirection: "column" as const,
     gap: "1rem",
-    width: "100%",
-    flex: 1,
     minHeight: 0,
   },
   header: {
@@ -310,11 +315,15 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gridTemplateColumns: "repeat(5, 1fr)",
     gap: "0.5rem",
+    // Absorb any extra row height (if the digest card is taller) so the day
+    // boxes' bottom edge stays flush with the digest card's bottom.
+    flex: 1,
   },
   day: {
     display: "flex",
     flexDirection: "column" as const,
     alignItems: "center",
+    justifyContent: "center",
     gap: "0.2rem",
     padding: "0.6rem 0",
     border: "1px solid var(--border)",
@@ -332,9 +341,8 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "10px",
     background: "var(--surface)",
     padding: "1rem",
-    // Fills the stretched column so the panel bottom matches the right
-    // column's last card; long file lists scroll instead of growing.
-    flex: 1,
+    // Shares the grid's last row with the to-do card, so their bottoms match;
+    // long file lists scroll instead of growing.
     minHeight: "120px",
     overflowY: "auto" as const,
   },

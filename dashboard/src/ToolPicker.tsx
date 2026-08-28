@@ -36,19 +36,26 @@ export function ToolPicker({ onSelect, onLogout }: ToolPickerProps) {
         <SiteStatusCard />
       </div>
 
+      {/* Both columns share the grid's rows (subgrid): row 1 = titles,
+          row 2 = calendar week nav + day boxes ↔ digest card (so the digest's
+          bottom edge lines up with the day boxes), row 3 = file panel ↔ to-do. */}
       <div style={styles.columns}>
         {/* Left: daily gangsheet calendar */}
         <section style={styles.left}>
-          <h2 style={styles.colTitle}>Daily Gangsheets</h2>
-          <p style={styles.colSub}>Upload, replace or delete the gangsheets for each work day</p>
+          <div>
+            <h2 style={styles.colTitle}>Daily Gangsheets</h2>
+            <p style={styles.colSub}>Upload, replace or delete the gangsheets for each work day</p>
+          </div>
           <FileCalendar />
         </section>
 
         {/* Right: the morning workflow, top to bottom — what's waiting
-            (digest), act on it (to-do), then passive store health (website) */}
+            (digest), then act on it (to-do) */}
         <section style={styles.right}>
-          <h2 style={styles.colTitle}>Today's Overview</h2>
-          <p style={styles.colSub}>What's waiting, your checklist and store health</p>
+          <div>
+            <h2 style={styles.colTitle}>Today's Overview</h2>
+            <p style={styles.colSub}>What's waiting, your checklist and store health</p>
+          </div>
           <DigestCard />
           <TodoList />
         </section>
@@ -123,17 +130,19 @@ const styles: Record<string, React.CSSProperties> = {
   columns: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)",
-    gap: "2rem",
+    // Shared rows across both columns: titles / calendar-top ↔ digest /
+    // file panel ↔ to-do. Each row is as tall as its tallest side, so the
+    // cards' bottom edges line up horizontally.
+    gridTemplateRows: "auto auto 1fr",
+    columnGap: "2rem",
+    rowGap: "1rem",
     maxWidth: "1100px",
     margin: "0 auto",
-    // Stretch both columns to the same height; the file panel inside the
-    // left column flexes to fill, so its bottom lines up with the to-do card.
-    alignItems: "stretch",
   },
-  left: { minWidth: 0, display: "flex", flexDirection: "column" as const },
-  right: { minWidth: 0 },
+  left: { minWidth: 0, display: "grid", gridTemplateRows: "subgrid", gridRow: "span 3" },
+  right: { minWidth: 0, display: "grid", gridTemplateRows: "subgrid", gridRow: "span 3" },
   colTitle: { margin: "0 0 0.25rem", fontSize: "1.25rem", color: "var(--text)" },
-  colSub: { margin: "0 0 1rem", fontSize: "0.85rem", color: "var(--text-muted)" },
+  colSub: { margin: 0, fontSize: "0.85rem", color: "var(--text-muted)" },
   grid: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",

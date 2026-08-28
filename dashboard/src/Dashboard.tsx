@@ -428,7 +428,9 @@ export function Dashboard({ onLogout, onBack }: { onLogout: () => void; onBack?:
 
         {/* Right column — monitoring */}
         <div style={styles.rightCol}>
-          <DigestCard />
+          <div style={{ marginBottom: "1rem" }}>
+            <DigestCard />
+          </div>
           {stats && (
             <div style={styles.grid}>
               <StatCard

@@ -62,11 +62,6 @@ export function DigestCard() {
   // Render the card shell immediately with "—" placeholders — a card that pops
   // in after the fetch makes the whole page jump.
   const loading = data === null;
-  // Ticked-off channels count as handled, so finishing the checklist
-  // flips the card to "all clear" even if counts haven't refreshed yet.
-  const needsAttention = data
-    ? (emailsTicked ? 0 : data.emailUnread || 0) + (dmsTicked ? 0 : data.igUnread || 0)
-    : null;
 
   return (
     <div style={styles.card}>
@@ -98,10 +93,6 @@ export function DigestCard() {
           color={data?.sheetsUploaded == null ? undefined : data.sheetsUploaded > 0 ? "#2e7d32" : "#d32f2f"}
         />
       </div>
-
-      {needsAttention === 0 && (
-        <div style={styles.allClear}>All clear — nothing waiting.</div>
-      )}
     </div>
   );
 }
@@ -124,7 +115,9 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: "8px",
     boxShadow: "0 2px 8px var(--shadow)",
     padding: "1rem",
-    marginBottom: "1rem",
+    // No own margin: the home page grid row stretches this card so its bottom
+    // lines up with the calendar's day boxes; callers add spacing outside.
+    boxSizing: "border-box",
   },
   header: {
     display: "flex",
@@ -138,10 +131,8 @@ const styles: Record<string, CSSProperties> = {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
     gap: "0.5rem",
-    marginBottom: "0.75rem",
   },
   item: { textAlign: "center" },
   itemValue: { fontSize: "1.4rem", fontWeight: 700, color: "var(--text)" },
   itemLabel: { fontSize: "0.72rem", color: "var(--text-muted)" },
-  allClear: { marginTop: "0.5rem", fontSize: "0.85rem", color: "#2e7d32" },
 };
