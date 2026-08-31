@@ -536,8 +536,8 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
                 : j
             )
           );
-          triggerDownload(pdfBlobUrl, `${msg.name}_gangsheet.pdf`);
-          triggerDownload(aiBlobUrl, `${msg.name}_gangsheet.ai`);
+          triggerDownload(pdfBlobUrl, `${msg.name}.pdf`);
+          triggerDownload(aiBlobUrl, `${msg.name}.ai`);
           busyRef.current = false;
           pumpQueue();
           break;
@@ -604,7 +604,11 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
 
   /** Queue a CSV that arrived as text (Shopify pull) instead of a dropped file. */
   function enqueueCsv(name: string, csvText: string, fileName: string) {
-    const clean = name.replace(/[^A-Za-z0-9._-]/g, "_") || "sheet";
+    // Sheets are named by the order-number range in the CSV (25760-25974);
+    // the caller's name is only a fallback when no order numbers are present.
+    const range = orderRange(csvText);
+    const rangeName = range ? `${range.start}-${range.end}` : name;
+    const clean = rangeName.replace(/[^A-Za-z0-9._-]/g, "_") || "sheet";
     const job: SheetJob = {
       id: nextJobId++,
       name: clean,
@@ -637,14 +641,11 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
         setLogs((prev) => [...prev, `Shopify pull: ${data.orders} orders, no printable items in range`]);
         return;
       }
-      // Name the sheet by the order-number range in the pull (matching the
-      // auto-daily and order-range pulls) rather than the picked times.
-      const range = orderRange(data.csv);
-      const label = range
-        ? `Orders_${range.start}-${range.end}`
-        : pullFrom || pullTo
-          ? `Orders_${pullFrom || "start"}_${pullTo || "now"}`
-          : "Orders_last24h";
+      // enqueueCsv names the sheet by the CSV's order-number range; this label
+      // is only the fallback when the pull has no order numbers.
+      const label = pullFrom || pullTo
+        ? `Orders_${pullFrom || "start"}_${pullTo || "now"}`
+        : "Orders_last24h";
       enqueueCsv(label, data.csv, `Shopify pull — ${data.orders} orders, ${data.items} items`);
     } catch {
       setLogs((prev) => [...prev, "Shopify pull failed: network error"]);
@@ -860,10 +861,10 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
                 {job.status === "processing" && <span style={styles.spinner}>⏳</span>}
                 {job.status === "done" && (
                   <div style={styles.jobLinks}>
-                    <a href={job.pdfUrl} download={`${job.name}_gangsheet.pdf`} style={styles.dlLink}>
+                    <a href={job.pdfUrl} download={`${job.name}.pdf`} style={styles.dlLink}>
                       PDF
                     </a>
-                    <a href={job.aiUrl} download={`${job.name}_gangsheet.ai`} style={styles.dlLink}>
+                    <a href={job.aiUrl} download={`${job.name}.ai`} style={styles.dlLink}>
                       AI
                     </a>
                   </div>
