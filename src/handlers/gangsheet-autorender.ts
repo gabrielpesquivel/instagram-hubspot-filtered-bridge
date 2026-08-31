@@ -43,7 +43,12 @@ export async function renderDailyGangsheet(env: Env): Promise<void> {
   try {
     // Browser Rendering kills the session after 60s idle by default — far too
     // short for the Pyodide boot (~60 MB WASM). Extend to the render timeout.
-    browser = await puppeteer.launch(env.BROWSER, { keep_alive: RENDER_TIMEOUT_MS });
+    // protocolTimeout too: waitForFunction is one long CDP call, and the 180s
+    // default killed Monday-sized (72h window) renders before completion.
+    browser = await puppeteer.launch(env.BROWSER, {
+      keep_alive: RENDER_TIMEOUT_MS,
+      protocolTimeout: RENDER_TIMEOUT_MS,
+    });
     const page = await browser.newPage();
     await page.setCookie({
       name: "session",
