@@ -5,6 +5,7 @@ import { WebhookSubscriptions } from "./WebhookSubscriptions";
 import { AgentSettings } from "./AgentSettings";
 import { DigestCard } from "./DigestCard";
 import { Toaster, toast } from "./toast";
+import { TopBarActions } from "./TopBar";
 
 interface Stats {
   pending: { total: number; today: number };
@@ -76,7 +77,7 @@ interface BlocklistEntry {
 
 type LogTab = "pending" | "skipped";
 
-export function Dashboard({ onLogout, onBack }: { onLogout: () => void; onBack?: () => void }) {
+export function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -117,7 +118,8 @@ export function Dashboard({ onLogout, onBack }: { onLogout: () => void; onBack?:
         ]);
 
       if (statsRes.status === 401 || healthRes.status === 401) {
-        onLogout();
+        // Session expired — reload; the health check in App shows the login.
+        window.location.reload();
         return;
       }
 
@@ -350,34 +352,19 @@ export function Dashboard({ onLogout, onBack }: { onLogout: () => void; onBack?:
 
   return (
     <div style={styles.wrapper}>
-      <header style={styles.topBar}>
-        <div style={styles.topBarInner}>
-          {onBack && (
-            <button onClick={onBack} style={{ ...styles.logoutBtn, marginLeft: 0, marginRight: "0.75rem" }}>
-              ← Tools
-            </button>
-          )}
-          <img src="/logo.png" alt="BootInk" style={styles.topBarLogo} />
-          <span style={styles.topBarTitle}>Instagram DM Manager</span>
-          {notifPerm === "default" && (
-            <button
-              onClick={() =>
-                Notification.requestPermission().then((p) => setNotifPerm(p))
-              }
-              style={{ ...styles.logoutBtn, marginLeft: "auto", marginRight: "0.5rem" }}
-              title="Get a desktop notification when a new DM arrives"
-            >
-              🔔 Enable alerts
-            </button>
-          )}
+      <TopBarActions>
+        {notifPerm === "default" && (
           <button
-            onClick={onLogout}
-            style={{ ...styles.logoutBtn, ...(notifPerm === "default" ? { marginLeft: 0 } : {}) }}
+            onClick={() =>
+              Notification.requestPermission().then((p) => setNotifPerm(p))
+            }
+            style={styles.logoutBtn}
+            title="Get a desktop notification when a new DM arrives"
           >
-            Log out
+            🔔 Enable alerts
           </button>
-        </div>
-      </header>
+        )}
+      </TopBarActions>
 
       <div style={styles.page}>
       {error && <p style={styles.error}>{error}</p>}

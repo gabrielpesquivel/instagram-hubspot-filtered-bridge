@@ -1,31 +1,9 @@
 import { Conversations } from "./Conversations";
 import { Toaster } from "./toast";
 
-export function DmManager({
-  onLogout,
-  onBack,
-}: {
-  onLogout: () => void;
-  onBack: () => void;
-}) {
+export function DmManager() {
   return (
     <div style={styles.wrapper}>
-      <header style={styles.topBar}>
-        <div style={styles.topBarInner}>
-          <button
-            onClick={onBack}
-            style={{ ...styles.logoutBtn, marginLeft: 0, marginRight: "0.75rem" }}
-          >
-            ← Dashboard
-          </button>
-          <img src="/logo.png" alt="BootInk" style={styles.topBarLogo} />
-          <span style={styles.topBarTitle}>Instagram DM Manager</span>
-          <button onClick={onLogout} style={styles.logoutBtn}>
-            Log out
-          </button>
-        </div>
-      </header>
-
       <div style={styles.body}>
         <Conversations fullPage />
       </div>

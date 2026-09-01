@@ -1,10 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
 
-interface EmailManagerProps {
-  onBack: () => void;
-  onLogout: () => void;
-}
-
 interface EmailThread {
   threadId: string;
   messageId: string;
@@ -27,7 +22,7 @@ interface Suggestion {
   copied?: boolean;
 }
 
-export function EmailManager({ onBack, onLogout }: EmailManagerProps) {
+export function EmailManager() {
   const [conn, setConn] = useState<Connection | null>(null);
   const [threads, setThreads] = useState<EmailThread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
@@ -118,19 +113,6 @@ export function EmailManager({ onBack, onLogout }: EmailManagerProps) {
 
   return (
     <div style={styles.wrapper}>
-      <header style={styles.topBar}>
-        <div style={styles.topBarInner}>
-          <button onClick={onBack} style={styles.backBtn}>
-            ← Customer Support
-          </button>
-          <img src="/logo.png" alt="BootInk" style={styles.topBarLogo} />
-          <span style={styles.topBarTitle}>Email Manager</span>
-          <button onClick={onLogout} style={styles.logoutBtn}>
-            Log out
-          </button>
-        </div>
-      </header>
-
       <div style={styles.page}>
         {conn === null && <p style={styles.muted}>Loading…</p>}
 

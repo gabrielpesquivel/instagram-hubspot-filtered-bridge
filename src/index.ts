@@ -84,6 +84,21 @@ import {
 } from "./handlers/gangsheet-orders";
 import { renderDailyGangsheet } from "./handlers/gangsheet-autorender";
 import { handleDigest } from "./handlers/digest";
+import {
+  handleGetSentiment,
+  handleSentimentScan,
+  handleSentimentResolve,
+  handleSentimentReopen,
+  handleSentimentDismiss,
+  scanSentiment,
+} from "./handlers/sentiment";
+import {
+  handleGetStockTake,
+  handleStockAddItem,
+  handleStockAdjust,
+  handleStockRemove,
+  handleStockReset,
+} from "./handlers/stocktake";
 import { handleGetShopReviews, handlePostShopReviews } from "./handlers/shop-reviews";
 import { handleGetNotes, handlePutNotes } from "./handlers/notes";
 import { handleSiteStatus, recordSitePing } from "./handlers/site-status";
@@ -394,6 +409,40 @@ export default {
       return handleDigest(request, env);
     }
 
+    // Customer sentiment — continuous issue log built from DMs + emails
+    if (path === "/api/sentiment" && request.method === "GET") {
+      return handleGetSentiment(request, env);
+    }
+    if (path === "/api/sentiment/scan" && request.method === "POST") {
+      return handleSentimentScan(request, env);
+    }
+    if (path === "/api/sentiment/resolve" && request.method === "POST") {
+      return handleSentimentResolve(request, env);
+    }
+    if (path === "/api/sentiment/reopen" && request.method === "POST") {
+      return handleSentimentReopen(request, env);
+    }
+    if (path === "/api/sentiment/dismiss" && request.method === "POST") {
+      return handleSentimentDismiss(request, env);
+    }
+
+    // Stock take (manual on-hand tally; scanning comes later)
+    if (path === "/api/stocktake" && request.method === "GET") {
+      return handleGetStockTake(request, env);
+    }
+    if (path === "/api/stocktake/item" && request.method === "POST") {
+      return handleStockAddItem(request, env);
+    }
+    if (path === "/api/stocktake/adjust" && request.method === "POST") {
+      return handleStockAdjust(request, env);
+    }
+    if (path === "/api/stocktake/remove" && request.method === "POST") {
+      return handleStockRemove(request, env);
+    }
+    if (path === "/api/stocktake/reset" && request.method === "POST") {
+      return handleStockReset(request, env);
+    }
+
     // Shop (shop.app) review stats (home-page card; synced by a local
     // scraper — shop.app blocks datacenter IPs, see handlers/shop-reviews.ts)
     if (path === "/api/reviews" && request.method === "GET") {
@@ -470,6 +519,7 @@ export default {
       case "*/10 * * * *":
         ctx.waitUntil(autoDraftEmails(env));
         ctx.waitUntil(recordSitePing(env)); // 24h response-time history
+        ctx.waitUntil(scanSentiment(env)); // fold new DMs/emails into the issue log
         break;
     }
   },

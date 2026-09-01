@@ -3,35 +3,13 @@ import { SiteStatusCard } from "./SiteStatusCard";
 import { FileCalendar } from "./FileCalendar";
 import { TodoList } from "./TodoList";
 import { NotesCard } from "./NotesCard";
-import { ThemeToggle } from "./ThemeToggle";
 
-interface ToolPickerProps {
-  onSelect: (tool: "support" | "gangsheet") => void;
-  onLogout: () => void;
-}
+// Home page. Navigation, logo, theme and logout live in the SideNav shell —
+// this page is just the morning-overview widgets.
 
-export function ToolPicker({ onSelect, onLogout }: ToolPickerProps) {
+export function ToolPicker() {
   return (
     <div style={styles.container}>
-      {/* Header: gangsheet button left, logo centered, customer support right */}
-      <header style={styles.header}>
-        <div style={styles.headerLeft}>
-          <button style={styles.tab} onClick={() => onSelect("gangsheet")}>
-            Gangsheet Generator
-          </button>
-          <button style={styles.tab} onClick={() => onSelect("support")}>
-            Customer Support
-          </button>
-        </div>
-        <img src="/logo.png" alt="BootInk" style={styles.logo} />
-        <div style={styles.headerRight}>
-          <ThemeToggle />
-          <button onClick={onLogout} style={styles.logoutBtn}>
-            Log out
-          </button>
-        </div>
-      </header>
-
       {/* Hero: website health + reviews, full width across both columns */}
       <div style={styles.hero}>
         <SiteStatusCard />
@@ -79,55 +57,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: "var(--text)",
     padding: "1.5rem",
     boxSizing: "border-box" as const,
-  },
-  header: {
-    display: "grid",
-    gridTemplateColumns: "1fr auto 1fr",
-    alignItems: "center",
-    gap: "1.5rem",
-    maxWidth: "1100px",
-    margin: "0 auto 1.75rem",
-    paddingBottom: "1rem",
-    borderBottom: "1px solid var(--border)",
-  },
-  logo: {
-    width: "150px",
-    height: "auto",
-    flexShrink: 0,
-  },
-  headerLeft: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-start",
-    gap: "0.75rem",
-  },
-  tab: {
-    padding: "0.5rem 1.25rem",
-    background: "var(--surface)",
-    border: "1px solid var(--border)",
-    borderRadius: "999px",
-    cursor: "pointer",
-    fontSize: "0.9rem",
-    fontWeight: 600,
-    color: "var(--text)",
-    boxShadow: "0 1px 3px var(--shadow)",
-    fontFamily: "inherit",
-  },
-  headerRight: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: "0.6rem",
-    flexShrink: 0,
-  },
-  logoutBtn: {
-    padding: "0.4rem 1rem",
-    background: "var(--surface)",
-    border: "1px solid var(--border-strong)",
-    borderRadius: "8px",
-    cursor: "pointer",
-    fontSize: "0.8rem",
-    color: "var(--text-muted)",
   },
   hero: {
     maxWidth: "1100px",

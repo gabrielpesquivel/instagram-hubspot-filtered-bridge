@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { ThemeToggle } from "./ThemeToggle";
 
 interface SheetJob {
   id: number;
@@ -9,11 +8,6 @@ interface SheetJob {
   detail: string;
   pdfUrl?: string;
   aiUrl?: string;
-}
-
-interface GangsheetProps {
-  onBack: () => void;
-  onLogout: () => void;
 }
 
 // Rasterize an SVG with gradients/clipPaths to a PNG via canvas — replaces the
@@ -320,7 +314,7 @@ const dateInputStyle: CSSProperties = {
   fontSize: "0.85rem",
 };
 
-export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
+export function Gangsheet() {
   const workerRef = useRef<Worker | null>(null);
   const queueRef = useRef<{ job: SheetJob; csv: ArrayBuffer }[]>([]);
   const busyRef = useRef(false);
@@ -705,25 +699,6 @@ export function Gangsheet({ onBack, onLogout }: GangsheetProps) {
 
   return (
     <div style={styles.wrapper}>
-      <header style={styles.topBar}>
-        <div style={styles.topBarInner}>
-          <img
-            src="/logo.png"
-            alt="BootInk"
-            style={styles.topBarLogo}
-            onClick={onBack}
-            title="Back to tools"
-          />
-          <span style={styles.topBarTitle}>Gangsheet Generator</span>
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <ThemeToggle />
-            <button onClick={onLogout} style={styles.logoutBtn}>
-              Log out
-            </button>
-          </div>
-        </div>
-      </header>
-
       <div style={styles.page}>
         <style>{"@keyframes gs-spin { to { transform: rotate(360deg); } }"}</style>
 

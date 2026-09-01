@@ -6,22 +6,37 @@ import { InboxPage } from "./InboxPage";
 import { EmailManager } from "./EmailManager";
 import { Gangsheet } from "./Gangsheet";
 import { DmManager } from "./DmManager";
+import { Sentiment } from "./Sentiment";
+import { StockTake } from "./StockTake";
+import { SideNav, type NavTool } from "./SideNav";
+import { TopBar } from "./TopBar";
 
-type Tool = "picker" | "support" | "email" | "bridge" | "gangsheet" | "dms";
+const TITLES: Record<NavTool, string> = {
+  picker: "Home",
+  support: "Support Assistant",
+  email: "Email Manager",
+  dms: "Instagram DMs",
+  gangsheet: "Gangsheet Generator",
+  sentiment: "Customer Sentiment",
+  stocktake: "Stock View",
+  bridge: "Dashboard",
+};
 
-function toolFromHash(): Tool {
+function toolFromHash(): NavTool {
   const hash = window.location.hash;
   if (hash.startsWith("#/dms")) return "dms";
   if (hash.startsWith("#/bridge")) return "bridge";
   if (hash.startsWith("#/gangsheet")) return "gangsheet";
   if (hash.startsWith("#/email")) return "email";
   if (hash.startsWith("#/support")) return "support";
+  if (hash.startsWith("#/sentiment")) return "sentiment";
+  if (hash.startsWith("#/stocktake")) return "stocktake";
   return "picker";
 }
 
 export function App() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
-  const [tool, setTool] = useState<Tool>(toolFromHash);
+  const [tool, setTool] = useState<NavTool>(toolFromHash);
 
   useEffect(() => {
     fetch("/api/health")
@@ -46,32 +61,24 @@ export function App() {
     window.location.hash = "";
     setLoggedIn(false);
   };
-  const goPicker = () => {
-    window.location.hash = "#/";
-  };
-  const goSupport = () => {
-    window.location.hash = "#/support";
-  };
 
-  if (tool === "support") return <InboxPage onLogout={logout} onBack={goPicker} />;
-  if (tool === "email") return <EmailManager onLogout={logout} onBack={goSupport} />;
-  if (tool === "bridge") return <Dashboard onLogout={logout} onBack={goSupport} />;
-  if (tool === "dms")
-    return (
-      <DmManager
-        onLogout={logout}
-        onBack={() => {
-          window.location.hash = "#/bridge";
-        }}
-      />
-    );
-  if (tool === "gangsheet") return <Gangsheet onLogout={logout} onBack={goPicker} />;
+  let page: React.ReactNode;
+  if (tool === "support") page = <InboxPage />;
+  else if (tool === "email") page = <EmailManager />;
+  else if (tool === "bridge") page = <Dashboard />;
+  else if (tool === "dms") page = <DmManager />;
+  else if (tool === "gangsheet") page = <Gangsheet />;
+  else if (tool === "sentiment") page = <Sentiment />;
+  else if (tool === "stocktake") page = <StockTake />;
+  else page = <ToolPicker />;
+
   return (
-    <ToolPicker
-      onLogout={logout}
-      onSelect={(t) => {
-        window.location.hash = `#/${t}`;
-      }}
-    />
+    <div className="app-shell">
+      <SideNav active={tool} />
+      <main className="app-main">
+        <TopBar title={TITLES[tool]} onLogout={logout} />
+        <div className="app-page">{page}</div>
+      </main>
+    </div>
   );
 }

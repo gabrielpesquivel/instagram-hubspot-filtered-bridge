@@ -1,42 +1,21 @@
 import { useState } from "react";
 import { Inbox } from "./Inbox";
 import { SettingsDrawer } from "./SettingsDrawer";
-import { ThemeToggle } from "./ThemeToggle";
+import { TopBarActions } from "./TopBar";
 import { Toaster } from "./toast";
 import { AmendmentPrompt } from "./AmendmentPrompt";
 import { ActionPrompt } from "./ActionPrompt";
 
-interface InboxPageProps {
-  onBack: () => void;
-  onLogout: () => void;
-}
-
-export function InboxPage({ onBack, onLogout }: InboxPageProps) {
+export function InboxPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <div style={styles.wrapper}>
-      <header style={styles.topBar}>
-        <div style={styles.topBarInner}>
-          <img
-            src="/logo.png"
-            alt="BootInk"
-            style={styles.logo}
-            onClick={onBack}
-            title="Back to tools"
-          />
-          <span style={styles.title}>Customer Support</span>
-          <div style={styles.right}>
-            <button onClick={() => setSettingsOpen(true)} style={styles.ghostBtn} title="Channels & settings">
-              ⚙ Settings
-            </button>
-            <ThemeToggle />
-            <button onClick={onLogout} style={styles.ghostBtn}>
-              Log out
-            </button>
-          </div>
-        </div>
-      </header>
+      <TopBarActions>
+        <button onClick={() => setSettingsOpen(true)} style={styles.ghostBtn} title="Channels & settings">
+          ⚙ Settings
+        </button>
+      </TopBarActions>
 
       <div style={styles.body}>
         <Inbox />
