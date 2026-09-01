@@ -94,10 +94,10 @@ import {
 } from "./handlers/sentiment";
 import {
   handleGetStockTake,
-  handleStockAddItem,
-  handleStockAdjust,
-  handleStockRemove,
-  handleStockReset,
+  handleStockUpdateItem,
+  handleStockReceive,
+  handleStockOrdered,
+  handleStockScan,
 } from "./handlers/stocktake";
 import { handleGetShopReviews, handlePostShopReviews } from "./handlers/shop-reviews";
 import { handleGetNotes, handlePutNotes } from "./handlers/notes";
@@ -426,21 +426,21 @@ export default {
       return handleSentimentDismiss(request, env);
     }
 
-    // Stock take (manual on-hand tally; scanning comes later)
+    // Stock View — consumables catalog, runout projections, scanner intake
     if (path === "/api/stocktake" && request.method === "GET") {
       return handleGetStockTake(request, env);
     }
     if (path === "/api/stocktake/item" && request.method === "POST") {
-      return handleStockAddItem(request, env);
+      return handleStockUpdateItem(request, env);
     }
-    if (path === "/api/stocktake/adjust" && request.method === "POST") {
-      return handleStockAdjust(request, env);
+    if (path === "/api/stocktake/receive" && request.method === "POST") {
+      return handleStockReceive(request, env);
     }
-    if (path === "/api/stocktake/remove" && request.method === "POST") {
-      return handleStockRemove(request, env);
+    if (path === "/api/stocktake/ordered" && request.method === "POST") {
+      return handleStockOrdered(request, env);
     }
-    if (path === "/api/stocktake/reset" && request.method === "POST") {
-      return handleStockReset(request, env);
+    if (path === "/api/stocktake/scan" && request.method === "POST") {
+      return handleStockScan(request, env);
     }
 
     // Shop (shop.app) review stats (home-page card; synced by a local

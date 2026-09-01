@@ -4,12 +4,26 @@ import { useEffect, useState, type CSSProperties } from "react";
 // from /api/digest; null sections mean that integration isn't connected (or
 // failed) and render as "—" rather than alarming zeros.
 
+interface StockAlert {
+  name: string;
+  status: "order-now" | "order-soon" | "order-overdue";
+  daysLeft: number | null;
+  eta: string | null;
+}
+
 interface DigestData {
   date: string;
   emailUnread: number | null;
   igUnread: number | null;
   sheetsUploaded: number | null;
+  stockAlerts: StockAlert[] | null;
 }
+
+const STOCK_ALERT_LABEL: Record<StockAlert["status"], string> = {
+  "order-now": "order now",
+  "order-soon": "order soon",
+  "order-overdue": "order overdue",
+};
 
 const fmt = (n: number | null | undefined) => (n === null || n === undefined ? "—" : String(n));
 
@@ -93,6 +107,29 @@ export function DigestCard() {
           color={data?.sheetsUploaded == null ? undefined : data.sheetsUploaded > 0 ? "#2e7d32" : "#d32f2f"}
         />
       </div>
+
+      {/* Consumables needing an order — click through to Stock View */}
+      {!!data?.stockAlerts?.length && (
+        <a
+          href="#/stocktake"
+          style={styles.stockAlerts}
+          onClick={(e) => {
+            e.preventDefault();
+            window.location.hash = "#/stocktake";
+          }}
+        >
+          {data.stockAlerts.map((a) => (
+            <span key={a.name} style={styles.stockAlertLine}>
+              <span style={{ color: a.status === "order-soon" ? "#ff9800" : "#d32f2f", fontWeight: 700 }}>
+                ⚠ {a.name}
+              </span>{" "}
+              — {STOCK_ALERT_LABEL[a.status]}
+              {a.daysLeft != null ? ` (runs out in ${a.daysLeft}d)` : ""}
+              {a.status === "order-overdue" && a.eta ? ` (ETA was ${new Date(a.eta).toLocaleDateString()})` : ""}
+            </span>
+          ))}
+        </a>
+      )}
     </div>
   );
 }
@@ -133,6 +170,19 @@ const styles: Record<string, CSSProperties> = {
     gap: "0.5rem",
   },
   item: { textAlign: "center" },
+  stockAlerts: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.25rem",
+    marginTop: "0.75rem",
+    paddingTop: "0.65rem",
+    borderTop: "1px solid var(--border)",
+    fontSize: "0.8rem",
+    color: "var(--text-muted)",
+    textDecoration: "none",
+    cursor: "pointer",
+  },
+  stockAlertLine: { lineHeight: 1.4 },
   itemValue: { fontSize: "1.4rem", fontWeight: 700, color: "var(--text)" },
   itemLabel: { fontSize: "0.72rem", color: "var(--text-muted)" },
 };

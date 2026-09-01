@@ -372,6 +372,84 @@ export async function fetchGangsheetRowsByOrderRange(
   return fetchGangsheetRows(env, loCreated, toISO, { lo, hi });
 }
 
+// ── Order consumption stats (Stock View) ─────────────────────────────────────
+// Every order consumes packaging; every unit consumes ink/film/wipes. The
+// stock projections need recent volume: order count, total units, and the
+// wipes total (½ per unit, rounded up PER ORDER — so it must be summed here,
+// not derived from the unit total).
+
+export interface DailyConsumption {
+  orders: number;
+  units: number;
+  wipes: number;
+}
+
+export interface OrderConsumptionStats {
+  days: number;
+  orders: number;
+  units: number;
+  wipes: number;
+  // Per-UTC-day buckets — power "consumed since the last count" and the
+  // 7-day-vs-28-day demand-spike comparison.
+  daily: Record<string, DailyConsumption>;
+}
+
+const ORDER_STATS_QUERY = `query($q: String!, $n: Int!, $cursor: String) {
+  orders(first: $n, after: $cursor, query: $q, sortKey: CREATED_AT) {
+    pageInfo { hasNextPage endCursor }
+    edges { node {
+      createdAt cancelledAt
+      lineItems(first: 100) { edges { node { currentQuantity } } }
+    } }
+  }
+}`;
+
+/** Volume over the trailing `days` window, totals + per-day buckets. Skips
+ *  cancelled orders; uses currentQuantity so refunds are already deducted.
+ *  Throws on API errors. */
+export async function fetchOrderConsumptionStats(env: Env, days: number): Promise<OrderConsumptionStats> {
+  type Node = {
+    createdAt: string;
+    cancelledAt: string | null;
+    lineItems: { edges: { node: { currentQuantity: number } }[] };
+  };
+  const fromISO = new Date(Date.now() - days * 24 * 3600_000).toISOString();
+  const q = `created_at:>='${fromISO}'`;
+  let orders = 0;
+  let units = 0;
+  let wipes = 0;
+  const daily: Record<string, DailyConsumption> = {};
+  let cursor: string | null = null;
+  // ~110 orders/day × 28 days ≈ 3k — cap far above that. Truncation here is
+  // poison: ascending sort means it silently drops the NEWEST days, which
+  // deflates the 7-day rate and corrupts the spike comparison.
+  for (let page = 0; page < 250; page++) {
+    const data: {
+      orders: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; edges: { node: Node }[] };
+    } = await adminGraphQL(env, ORDER_STATS_QUERY, { q, n: 50, cursor });
+    for (const { node } of data.orders.edges) {
+      if (node.cancelledAt) continue;
+      const orderUnits = node.lineItems.edges.reduce(
+        (s, e) => s + Math.max(0, e.node.currentQuantity),
+        0
+      );
+      if (orderUnits <= 0) continue;
+      const orderWipes = Math.ceil(orderUnits / 2);
+      orders++;
+      units += orderUnits;
+      wipes += orderWipes;
+      const day = node.createdAt.slice(0, 10);
+      const bucket = (daily[day] ||= { orders: 0, units: 0, wipes: 0 });
+      bucket.orders++;
+      bucket.units += orderUnits;
+      bucket.wipes += orderWipes;
+    }
+    if (!data.orders.pageInfo.hasNextPage) break;
+    cursor = data.orders.pageInfo.endCursor;
+  }
+  return { days, orders, units, wipes, daily };
+}
+
 // ── Writes ───────────────────────────────────────────────────────────────────
 // Mutations behind the agent-confirmed order actions. Unlike the read path these
 // THROW on failure (with a useful message) so the handler can report it to the

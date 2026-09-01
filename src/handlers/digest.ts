@@ -6,6 +6,7 @@ import { listUnreadThreads } from "../services/gmail-api";
 import { listInstagramConversations } from "../services/instagram-conversations";
 import { getDoneMap } from "./instagram-inbox";
 import { isBlocklisted } from "../services/blocklist";
+import { getStockAlerts } from "./stocktake";
 
 // Daily digest for the dashboard widget: one call aggregating what needs
 // attention this morning. Every section is fail-soft (null = source
@@ -36,7 +37,7 @@ export async function handleDigest(request: Request, env: Env): Promise<Response
   // disagrees with what the operator sees when they click through.
   const cutoff = Date.now() - 48 * 3600_000;
 
-  const [emailUnread, igUnread, dailyOrders, sheetsToday] = await Promise.all([
+  const [emailUnread, igUnread, dailyOrders, sheetsToday, stockAlerts] = await Promise.all([
     (async () => {
       const token = await getValidGoogleToken(env);
       if (!token) return null;
@@ -80,6 +81,7 @@ export async function handleDigest(request: Request, env: Env): Promise<Response
     env.GANGSHEET_FILES.list({ prefix: `gangsheets/${date}/` })
       .then((l) => l.objects.length)
       .catch(() => null),
+    getStockAlerts(env),
   ]);
 
   const payload = JSON.stringify({
@@ -88,6 +90,7 @@ export async function handleDigest(request: Request, env: Env): Promise<Response
     igUnread,                // open IG threads the inbox shows (null = no data)
     dailyOrders,             // this morning's Shopify pull (null = not run)
     sheetsUploaded: sheetsToday, // files stored for today — >0 means gangsheet done
+    stockAlerts,             // consumables needing an order (null = unavailable)
   });
   await env.PROFILE_CACHE.put(CACHE_KEY, payload, { expirationTtl: CACHE_TTL });
   return new Response(payload, { headers: { "Content-Type": "application/json" } });
