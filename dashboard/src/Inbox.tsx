@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "./toast";
 import { showAmendment } from "./amendment";
 import { showActions } from "./action";
+import { ManualActions } from "./ActionPrompt";
 
 // ── Unified data model ──────────────────────────────────────────────────────
 // Both channels collapse to a single InboxItem for the list; the thread view
@@ -1187,6 +1188,9 @@ export function Inbox() {
                 }}
               />
               <div style={styles.composerBtns}>
+                {/* Manual order actions — always here even when the AI popup
+                    doesn't fire for a request. */}
+                <ManualActions />
                 <button
                   onClick={handleAiDraft}
                   disabled={drafting || composerDisabled}

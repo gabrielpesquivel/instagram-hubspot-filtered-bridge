@@ -53,6 +53,45 @@ export function ActionPrompt() {
   );
 }
 
+/** Always-available fallback for all five order actions: compact buttons that
+ *  open the identical modals with a blank proposal, for when the AI misses a
+ *  request (or there is no conversation at all). Order number is typed in.
+ *  Lives in the composer row, left of Auto Draft. */
+const MANUAL_ACTIONS: { type: string; label: string; summary: string }[] = [
+  { type: "update_address", label: "Address", summary: "Change order address" },
+  { type: "update_email", label: "Email", summary: "Change order email" },
+  { type: "cancel_refund", label: "Refund", summary: "Cancel / refund order" },
+  { type: "duplicate_order", label: "Duplicate", summary: "Duplicate / replace order" },
+  { type: "add_to_order", label: "Add items", summary: "Add items to order" },
+];
+
+export function ManualActions() {
+  const [active, setActive] = useState<ActionProposal | null>(null);
+
+  return (
+    <>
+      {MANUAL_ACTIONS.map((a) => (
+        <button
+          key={a.type}
+          style={styles.manualBtn}
+          title={a.summary}
+          onClick={() => setActive({ id: crypto.randomUUID(), type: a.type, summary: a.summary, args: {} })}
+        >
+          {a.label}
+        </button>
+      ))}
+      {active && (
+        <ActionModal
+          key={active.id}
+          proposal={active}
+          onClose={() => setActive(null)}
+          onDone={() => setActive(null)}
+        />
+      )}
+    </>
+  );
+}
+
 // ── shared helpers ────────────────────────────────────────────────────────────
 const arg = (a: ActionProposal, k: string): string => {
   const v = a.args?.[k];
@@ -649,4 +688,5 @@ const styles: Record<string, React.CSSProperties> = {
   qty: { width: "3rem", padding: "0.3rem", background: "var(--surface-2)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "7px", fontSize: "0.8rem" },
   submit: { marginTop: "0.4rem", padding: "0.6rem", background: "#2e7d32", color: "#fff", border: "none", borderRadius: "9px", fontSize: "0.88rem", fontWeight: 700, cursor: "pointer" },
   submitDanger: { background: "#d32f2f" },
+  manualBtn: { padding: "0.45rem 0.7rem", background: "var(--surface)", border: "1px solid var(--border-strong)", borderRadius: "8px", cursor: "pointer", fontSize: "0.78rem", fontWeight: 600, color: "var(--text-muted)", fontFamily: "inherit", whiteSpace: "nowrap" },
 };
