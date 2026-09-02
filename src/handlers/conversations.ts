@@ -17,6 +17,8 @@ import {
   getGeminiSettings,
   saveGeminiSettings,
   maybeProposeAmendment,
+  discountFromRequest,
+  discountInstruction,
 } from "../services/gemini-api";
 import type { ActionProposal } from "../services/gemini-api";
 import { incrementStat, appendLog } from "../services/stats";
@@ -177,8 +179,13 @@ export async function handleSuggestConversationReply(
   }
 
   try {
+    const discount = await discountFromRequest(request);
     const actions: ActionProposal[] = [];
-    const suggestion = await generateReply(conv.messages, env, undefined, { collectActions: actions });
+    const suggestion = await generateReply(
+      conv.messages, env,
+      discount ? discountInstruction(discount) : undefined,
+      { collectActions: actions }
+    );
     return jsonResponse({ suggestion, actions });
   } catch (error) {
     return jsonResponse({

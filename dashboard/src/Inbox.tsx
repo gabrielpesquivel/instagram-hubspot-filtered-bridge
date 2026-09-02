@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "./toast";
 import { showAmendment } from "./amendment";
 import { showActions } from "./action";
+import { onDiscount, type CreatedDiscount } from "./discount";
 import { ManualActions } from "./ActionPrompt";
 
 // ── Unified data model ──────────────────────────────────────────────────────
@@ -523,7 +524,7 @@ export function Inbox() {
   }
 
   // ── Composer actions ────────────────────────────────────────────────────
-  async function handleAiDraft() {
+  async function handleAiDraft(discount?: CreatedDiscount) {
     if (!selected || drafting) return;
     setDrafting(true);
     try {
@@ -536,7 +537,13 @@ export function Inbox() {
             ? `/api/instagram/threads/${encodeURIComponent(selected.conversationId || "")}/suggest`
             : `/api/conversations/${encodeURIComponent(selected.id)}/suggest`
           : `/api/email/threads/${encodeURIComponent(selected.id)}/suggest`;
-      const res = await fetch(url, { method: "POST" });
+      const res = await fetch(url, {
+        method: "POST",
+        // A just-created discount code rides along so the AI includes it.
+        ...(discount
+          ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ discount }) }
+          : {}),
+      });
       const data = await res.json();
       if (res.ok && data.suggestion) {
         const raw: string = data.suggestion;
@@ -553,6 +560,13 @@ export function Inbox() {
       setDrafting(false);
     }
   }
+
+  // A discount created from the Discount modal → regenerate the draft for the
+  // open thread with the code woven in. Ref keeps the listener stable while
+  // still seeing the current selected thread / drafting state.
+  const aiDraftRef = useRef(handleAiDraft);
+  aiDraftRef.current = handleAiDraft;
+  useEffect(() => onDiscount((d) => { void aiDraftRef.current(d); }), []);
 
   async function handleSend() {
     if (!selected || !draft.trim() || sending) return;
@@ -1192,7 +1206,7 @@ export function Inbox() {
                     doesn't fire for a request. */}
                 <ManualActions />
                 <button
-                  onClick={handleAiDraft}
+                  onClick={() => handleAiDraft()}
                   disabled={drafting || composerDisabled}
                   style={styles.aiDraftBtn}
                 >

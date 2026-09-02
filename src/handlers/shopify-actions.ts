@@ -29,6 +29,8 @@ import {
   addItemsToOrder,
   searchProductVariants,
   canonCountry,
+  createSingleUseDiscount,
+  currentScopes,
   type StructuredAddress,
   type OrderWriteContext,
 } from "../services/shopify-api";
@@ -344,6 +346,57 @@ export async function handleAddToOrder(request: Request, env: Env): Promise<Resp
     return jsonResponse({ ok: true, order: order.name, invoiced: notify });
   } catch (error) {
     await cerr(env, "add_to_order failed:", error);
+    return jsonResponse({ error: errMsg(error) }, 502);
+  }
+}
+
+// ── create_discount ──────────────────────────────────────────────────────────
+// Body: { code, amount? } — creates a single-use fixed-amount discount code
+// (default $10, shop currency). The code is usually FIRSTNAME + last initial +
+// the dollar amount (e.g. SARAHJ10); the modal generates it, the agent can edit.
+// No StarShipit half — discounts are Shopify-only. Needs write_discounts scope.
+export async function handleCreateDiscount(request: Request, env: Env): Promise<Response> {
+  const body = await guard(request, env);
+  if (body instanceof Response) return body;
+
+  const code = String(body.code || "").trim().toUpperCase();
+  if (!/^[A-Z0-9]{4,40}$/.test(code)) {
+    return jsonResponse({ error: "Code must be 4–40 letters/numbers (no spaces or symbols)" }, 400);
+  }
+  const amount = String(body.amount ?? "10").trim();
+  if (isNaN(Number(amount)) || Number(amount) <= 0 || Number(amount) > 500) {
+    return jsonResponse({ error: "Amount must be a positive number (max 500)" }, 400);
+  }
+
+  try {
+    // Create-first: attempt the code as-is; when Shopify reports it taken,
+    // retry with a counter inserted before the trailing dollar amount so the
+    // code stays readable: JACKM10 taken → JACKM210, JACKM310… (appended when
+    // the code doesn't end in the amount, e.g. a fully custom code). No
+    // lookup-first pre-check — that needs read_discounts; this needs only write.
+    const amt = String(Math.round(Number(amount)));
+    const base = code.endsWith(amt) ? code.slice(0, code.length - amt.length) : null;
+    for (let n = 1; n <= 20; n++) {
+      const candidate = n === 1 ? code : base !== null ? `${base}${n}${amt}` : `${code}${n}`;
+      if ((await createSingleUseDiscount(env, { code: candidate, amount })) === "taken") continue;
+      await clog(env, `Discount ${candidate} created: $${amount} off, single-use, non-stacking`);
+      return jsonResponse({ ok: true, code: candidate, amount, adjusted: candidate !== code });
+    }
+    return jsonResponse({ error: `Code ${code} and 19 numbered variants are all taken — pick a different code` }, 409);
+  } catch (error) {
+    await cerr(env, "create_discount failed:", error);
+    return jsonResponse({ error: errMsg(error) }, 502);
+  }
+}
+
+// GET /api/shopify/actions/scopes — the scopes the live token actually has,
+// for diagnosing scope propagation after a Dev Dashboard release.
+export async function handleGetScopes(request: Request, env: Env): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) return jsonResponse({ error: "Unauthorized" }, 401);
+  if (!shopifyConfigured(env)) return jsonResponse({ error: "Shopify not configured", configured: false }, 503);
+  try {
+    return jsonResponse({ scopes: await currentScopes(env) });
+  } catch (error) {
     return jsonResponse({ error: errMsg(error) }, 502);
   }
 }

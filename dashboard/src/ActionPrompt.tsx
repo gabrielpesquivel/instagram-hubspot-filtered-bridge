@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { onActions, type ActionProposal } from "./action";
+import { announceDiscount } from "./discount";
 import { toast } from "./toast";
 
 /** Bottom-right cards for order actions the AI detected. "Review" opens a
@@ -63,6 +64,7 @@ const MANUAL_ACTIONS: { type: string; label: string; summary: string }[] = [
   { type: "cancel_refund", label: "Refund", summary: "Cancel / refund order" },
   { type: "duplicate_order", label: "Duplicate", summary: "Duplicate / replace order" },
   { type: "add_to_order", label: "Add items", summary: "Add items to order" },
+  { type: "create_discount", label: "Discount", summary: "Create one-time discount code" },
 ];
 
 export function ManualActions() {
@@ -130,6 +132,7 @@ function ActionModal(props: { proposal: ActionProposal; onClose: () => void; onD
         {t === "cancel_refund" && <CancelRefundForm {...props} />}
         {t === "duplicate_order" && <DuplicateForm {...props} />}
         {t === "add_to_order" && <AddToOrderForm {...props} />}
+        {t === "create_discount" && <DiscountForm {...props} />}
       </div>
     </div>
   );
@@ -622,6 +625,70 @@ function AddToOrderForm({ proposal, onDone }: FormProps) {
       ))}
       <Check label="Send invoice for the added amount" checked={notify} onChange={setNotify} />
       <SubmitRow busy={busy} label="Add items" onClick={submit} />
+    </div>
+  );
+}
+
+// ── create_discount ───────────────────────────────────────────────────────────
+/** FIRSTNAME + first letter of last name + dollar amount, letters/digits only.
+ *  e.g. Sarah Jones + $10 → SARAHJ10. */
+function discountCode(first: string, last: string, amount: string): string {
+  const clean = (s: string) => s.normalize("NFD").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  const amt = String(Math.round(Number(amount) || 0));
+  return `${clean(first)}${clean(last).slice(0, 1)}${amt}`;
+}
+
+function DiscountForm({ proposal, onDone }: FormProps) {
+  const [first, setFirst] = useState(arg(proposal, "first_name"));
+  const [last, setLast] = useState(arg(proposal, "last_name"));
+  const [amount, setAmount] = useState("10");
+  const [code, setCode] = useState("");
+  const [edited, setEdited] = useState(false); // manual code edit stops auto-regen
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!edited) setCode(discountCode(first, last, amount));
+  }, [first, last, amount, edited]);
+
+  async function submit() {
+    if (!/^[A-Z0-9]{4,40}$/.test(code)) return toast("Code needs 4+ letters/numbers, no spaces");
+    if (!(Number(amount) > 0)) return toast("Enter a valid amount");
+    setBusy(true);
+    try {
+      const { ok, data } = await postAction("create-discount", { code, amount });
+      if (ok) {
+        // Server may have numbered the code if it was taken (JACKM10 → JACKM210).
+        const created = typeof data.code === "string" ? data.code : code;
+        try { await navigator.clipboard.writeText(created); } catch { /* clipboard optional */ }
+        toast(
+          `✓ ${created} created — $${amount} off, single use (copied to clipboard)` +
+            (data.adjusted ? ` · ${code} was taken` : ""),
+          "success"
+        );
+        // Let the open composer re-draft the AI reply with the code included.
+        announceDiscount({ code: created, amount });
+        onDone();
+      } else toast(String(data.error || "Failed to create discount"));
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div style={styles.body}>
+      <div style={styles.row2}>
+        <Input ph="Customer first name" value={first} onChange={(e) => setFirst(e.target.value)} />
+        <Input ph="Last name" value={last} onChange={(e) => setLast(e.target.value)} />
+      </div>
+      <Input ph="Amount off (AUD)" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} />
+      <label style={styles.fieldLabel}>Code
+        <input
+          style={{ ...styles.input, fontWeight: 700, letterSpacing: "0.05em" }}
+          placeholder="Type names above to generate…"
+          value={code}
+          onChange={(e) => { setEdited(true); setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "")); }}
+        />
+      </label>
+      <div style={styles.hint}>Single use, doesn't stack with other discounts, whole-order, no expiry. Copied to clipboard on create.</div>
+      <SubmitRow busy={busy} label={`Create $${amount || "…"} discount`} onClick={submit} />
     </div>
   );
 }

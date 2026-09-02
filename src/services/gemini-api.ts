@@ -413,6 +413,34 @@ function buildActionProposal(name: string, args: Record<string, unknown>): Actio
   return { id: crypto.randomUUID(), type: name, orderNumber: order || undefined, summary, args };
 }
 
+// ── created-discount context ─────────────────────────────────────────────────
+// After the agent creates a one-time discount from the Discount modal, the
+// dashboard re-runs suggest with { discount: { code, amount } } so the drafted
+// reply hands the code to the customer instead of the agent pasting it in.
+export interface CreatedDiscount {
+  code: string;
+  amount: string;
+}
+
+/** Pull the optional created-discount context out of a suggest request body.
+ *  Suggest endpoints are POSTed with no body in the normal path — any parse
+ *  failure just means "no discount". */
+export async function discountFromRequest(request: Request): Promise<CreatedDiscount | undefined> {
+  try {
+    const body = (await request.json()) as { discount?: { code?: unknown; amount?: unknown } };
+    const code = String(body.discount?.code || "").trim();
+    if (!code) return undefined;
+    const amount = String(body.discount?.amount || "").trim() || "10";
+    return { code, amount };
+  } catch {
+    return undefined;
+  }
+}
+
+export function discountInstruction(d: CreatedDiscount): string {
+  return `DISCOUNT CODE CREATED — We have just created a one-time discount code for THIS customer: ${d.code} ($${d.amount} AUD off, single use, cannot be combined with other discounts, no expiry). Give them this exact code in your reply, worked in naturally as a goodwill gesture that fits the conversation, and briefly mention it's one-time use. Do not invent or promise any other discount.`;
+}
+
 function actionInstruction(): string {
   return `ORDER ACTIONS — The customer may ask us to change an existing order. When they CLEARLY request one of these for a specific order, CALL the matching tool with the order number and new details:
 - update_address — change the shipping address

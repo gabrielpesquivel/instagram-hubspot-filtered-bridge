@@ -72,6 +72,8 @@ import {
   handleRefundPreview,
   handleDuplicateOrder,
   handleAddToOrder,
+  handleCreateDiscount,
+  handleGetScopes,
   handleParseAddress,
   handleGetOrderItems,
   handleSearchVariants,
@@ -337,6 +339,9 @@ export default {
     if (path === "/api/shopify/actions/add-to-order" && request.method === "POST") {
       return handleAddToOrder(request, env);
     }
+    if (path === "/api/shopify/actions/create-discount" && request.method === "POST") {
+      return handleCreateDiscount(request, env);
+    }
     if (path === "/api/shopify/actions/parse-address" && request.method === "POST") {
       return handleParseAddress(request, env);
     }
@@ -345,6 +350,9 @@ export default {
     }
     if (path === "/api/shopify/actions/search-variants" && request.method === "GET") {
       return handleSearchVariants(request, env);
+    }
+    if (path === "/api/shopify/actions/scopes" && request.method === "GET") {
+      return handleGetScopes(request, env);
     }
 
     // AI guideline amendments (the self-improving loop)

@@ -1,7 +1,7 @@
 import type { Env, ConversationMessage } from "../types";
 import { isAuthenticated, jsonResponse } from "../utils/auth";
 import { cerr } from "../services/logger";
-import { generateReply, maybeProposeAmendment } from "../services/gemini-api";
+import { generateReply, maybeProposeAmendment, discountFromRequest, discountInstruction } from "../services/gemini-api";
 import type { ActionProposal } from "../services/gemini-api";
 import {
   generateGoogleAuthUrl,
@@ -125,7 +125,8 @@ export async function buildEmailSuggestion(
   env: Env,
   token: string,
   connEmail: string,
-  threadId: string
+  threadId: string,
+  extraInstruction?: string
 ): Promise<EmailSuggestion | null> {
   {
     const detail = await getThreadDetail(token, threadId, connEmail);
@@ -200,7 +201,7 @@ WEBSITE REFERENCE (email only): When pointing the customer to our website, say "
     const customerText = detail.messages.filter((m) => !m.fromUs).map((m) => m.text).join("\n");
     const orderNumber = orderNumberFrom(customerText);
     const actions: ActionProposal[] = [];
-    const suggestion = await generateReply(messages, env, emailInstruction, {
+    const suggestion = await generateReply(messages, env, [emailInstruction, extraInstruction].filter(Boolean).join("\n\n"), {
       shopify: { customerEmail, orderNumber: orderNumber || undefined },
       collectActions: actions,
     });
@@ -220,7 +221,11 @@ export async function handleSuggestEmailReply(
   if (!conn || !token) return jsonResponse({ error: "Gmail not connected" }, 409);
 
   try {
-    const result = await buildEmailSuggestion(env, token, conn.email, threadId);
+    const discount = await discountFromRequest(request);
+    const result = await buildEmailSuggestion(
+      env, token, conn.email, threadId,
+      discount ? discountInstruction(discount) : undefined
+    );
     if (!result) return jsonResponse({ error: "Thread not found or no customer message to reply to" }, 404);
     return jsonResponse(result);
   } catch (error) {

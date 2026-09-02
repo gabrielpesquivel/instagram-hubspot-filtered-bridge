@@ -1010,3 +1010,60 @@ export async function addItemsToOrder(
   const cErr = joinUserErrors(commit.orderEditCommit.userErrors);
   if (cErr) throw new Error(cErr);
 }
+
+const SCOPES_QUERY = `query { currentAppInstallation { accessScopes { handle } } }`;
+
+/** The access scopes the CURRENT token actually carries — for diagnosing scope
+ *  propagation after a Dev Dashboard release (token can lag the release). */
+export async function currentScopes(env: Env): Promise<string[]> {
+  const data = await adminGraphQL<{ currentAppInstallation: { accessScopes: { handle: string }[] } }>(
+    env, SCOPES_QUERY, {}
+  );
+  return data.currentAppInstallation.accessScopes.map((s) => s.handle);
+}
+
+const DISCOUNT_CREATE = `mutation($input: DiscountCodeBasicInput!) {
+  discountCodeBasicCreate(basicCodeDiscount: $input) {
+    codeDiscountNode { id }
+    userErrors { field code message }
+  }
+}`;
+
+/** Create a single-use fixed-amount discount code (shop currency). One redemption
+ *  total, once per customer, and combinesWith all-false so it never stacks with
+ *  other discounts. Applies to the whole order, no minimum. Requires the
+ *  `write_discounts` scope on the Shopify app.
+ *  Returns "taken" (instead of throwing) when the code already exists, so the
+ *  caller can retry with a numbered variant — a create-and-check flow rather
+ *  than a lookup-first one, to avoid needing the read_discounts scope. */
+export async function createSingleUseDiscount(
+  env: Env,
+  opts: { code: string; amount: string }
+): Promise<"created" | "taken"> {
+  const data = await adminGraphQL<{
+    discountCodeBasicCreate: {
+      codeDiscountNode: { id: string } | null;
+      userErrors: { field?: string[]; code?: string; message: string }[];
+    };
+  }>(env, DISCOUNT_CREATE, {
+    input: {
+      title: `${opts.code} — $${opts.amount} off (customer support)`,
+      code: opts.code,
+      startsAt: new Date().toISOString(),
+      usageLimit: 1,
+      appliesOncePerCustomer: true,
+      customerSelection: { all: true },
+      customerGets: {
+        value: { discountAmount: { amount: opts.amount, appliesOnEachItem: false } },
+        items: { all: true },
+      },
+      combinesWith: { orderDiscounts: false, productDiscounts: false, shippingDiscounts: false },
+    },
+  });
+  const errs = data.discountCodeBasicCreate.userErrors || [];
+  if (errs.some((e) => e.code === "TAKEN" || /taken|unique/i.test(e.message))) return "taken";
+  const err = joinUserErrors(errs);
+  if (err) throw new Error(err);
+  if (!data.discountCodeBasicCreate.codeDiscountNode) throw new Error("Discount not created");
+  return "created";
+}
