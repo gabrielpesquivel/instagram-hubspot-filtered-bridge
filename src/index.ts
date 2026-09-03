@@ -100,9 +100,12 @@ import {
   handleStockReceive,
   handleStockOrdered,
   handleStockScan,
+  handleStockUse,
+  refreshStockStats,
 } from "./handlers/stocktake";
 import { handleGetShopReviews, handlePostShopReviews } from "./handlers/shop-reviews";
 import { handleGetNotes, handlePutNotes } from "./handlers/notes";
+import { handleGetRoster, handlePutRoster } from "./handlers/roster";
 import { handleSiteStatus, recordSitePing } from "./handlers/site-status";
 import { autoDraftEmails } from "./handlers/email-autodraft";
 import {
@@ -450,6 +453,9 @@ export default {
     if (path === "/api/stocktake/scan" && request.method === "POST") {
       return handleStockScan(request, env);
     }
+    if (path === "/api/stocktake/use" && request.method === "POST") {
+      return handleStockUse(request, env);
+    }
 
     // Shop (shop.app) review stats (home-page card; synced by a local
     // scraper — shop.app blocks datacenter IPs, see handlers/shop-reviews.ts)
@@ -471,6 +477,14 @@ export default {
     }
     if (path === "/api/notes" && request.method === "PUT") {
       return handlePutNotes(request, env);
+    }
+
+    // Weekly staff roster grid (Operations tool)
+    if (path === "/api/roster" && request.method === "GET") {
+      return handleGetRoster(request, env);
+    }
+    if (path === "/api/roster" && request.method === "PUT") {
+      return handlePutRoster(request, env);
     }
 
     // Daily gangsheet file uploads (R2)
@@ -523,6 +537,7 @@ export default {
       case "0 23 * * *":
         // Weekends (AEST) store nothing — skip the render too.
         ctx.waitUntil(storeDailyOrders(env).then((stored) => (stored ? renderDailyGangsheet(env) : undefined)));
+        ctx.waitUntil(refreshStockStats(env)); // stock estimates pick up yesterday's orders
         break;
       case "*/10 * * * *":
         ctx.waitUntil(autoDraftEmails(env));

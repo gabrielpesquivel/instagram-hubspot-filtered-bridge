@@ -8,6 +8,7 @@ import { Gangsheet } from "./Gangsheet";
 import { DmManager } from "./DmManager";
 import { Sentiment } from "./Sentiment";
 import { StockTake } from "./StockTake";
+import { Roster } from "./Roster";
 import { SideNav, type NavTool } from "./SideNav";
 import { TopBar } from "./TopBar";
 
@@ -19,6 +20,7 @@ const TITLES: Record<NavTool, string> = {
   gangsheet: "Gangsheet Generator",
   sentiment: "Customer Sentiment",
   stocktake: "Stock View",
+  roster: "Roster",
   bridge: "Dashboard",
 };
 
@@ -31,6 +33,7 @@ function toolFromHash(): NavTool {
   if (hash.startsWith("#/support")) return "support";
   if (hash.startsWith("#/sentiment")) return "sentiment";
   if (hash.startsWith("#/stocktake")) return "stocktake";
+  if (hash.startsWith("#/roster")) return "roster";
   return "picker";
 }
 
@@ -70,6 +73,7 @@ export function App() {
   else if (tool === "gangsheet") page = <Gangsheet />;
   else if (tool === "sentiment") page = <Sentiment />;
   else if (tool === "stocktake") page = <StockTake />;
+  else if (tool === "roster") page = <Roster />;
   else page = <ToolPicker />;
 
   return (

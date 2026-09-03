@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
 // Stock View. Print-on-demand means stock is consumables only — a fixed
-// catalog (ink, film, bags, wipes, boxes, sleeves, labels). Weekly order
-// volume from Shopify drives a runout projection per item, compared against
-// its lead time: "order now" means the runout date is inside the lead time.
+// catalog (ink, film, bags, wipes, boxes, sleeves, labels), in two groups:
+//   Ink & film — MANUAL. No auto tick-down; staff hit "used one" when a
+//   bottle/roll finishes, and an "alert at" threshold drives the reorder flag.
+//   Packaging — CALCULATED. Weekly order volume from Shopify drives a runout
+//   projection per item, compared against its lead time: "order now" means
+//   the runout date is inside the lead time.
 // The scan box is wired for the USB barcode scanner: first scan of a new
 // barcode assigns it to an item with a pack size; every scan after that
 // registers stock automatically.
@@ -27,12 +30,13 @@ interface Item {
   id: string;
   name: string;
   unit: string;
-  usage: "perOrder" | "perUnit" | "wipes";
+  usage: "perOrder" | "perUnit" | "wipes" | "manual";
   qty: number | null;
   countedAt: string | null;
   effectiveQty: number | null;
   leadTimeDays: number | null;
   usagePerUnit: number | null;
+  lowAt: number | null;
   barcode: string | null;
   packSize: number;
   onOrder: OnOrder | null;
@@ -82,6 +86,7 @@ const USAGE_DESC: Record<Item["usage"], string> = {
   perOrder: "1 per order",
   perUnit: "per unit (set rate)",
   wipes: "½ per unit, rounded up per order",
+  manual: "manual — mark each one off as it's finished",
 };
 
 function fmtWeekly(n: number | null): string {
@@ -175,6 +180,15 @@ export function StockTake() {
     await load();
   };
 
+  const useOne = async (id: string) => {
+    await fetch("/api/stocktake/use", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, qty: 1 }),
+    });
+    await load();
+  };
+
   const receive = async (id: string, name: string) => {
     const raw = window.prompt(`How many arrived for "${name}"? (negative to correct)`);
     if (raw == null) return;
@@ -212,6 +226,8 @@ export function StockTake() {
   const alerts = items.filter(
     (i) => i.status === "order-now" || i.status === "order-soon" || i.status === "order-overdue"
   );
+  const manualItems = items.filter((i) => i.usage === "manual");
+  const calcItems = items.filter((i) => i.usage !== "manual");
   const weeks = stats ? stats.days / 7 : null;
   const spiking = demand && demand.spikePct >= 25;
 
@@ -310,8 +326,119 @@ export function StockTake() {
       {error && <p style={styles.error}>{error}</p>}
       {loading && <p style={styles.muted}>Loading stock…</p>}
 
+      {/* Ink & film — manual. Only moves when someone says so: "used one"
+          when a bottle/roll finishes, scan or "+ stock in" when more arrives. */}
+      {!loading && (
+        <div style={{ ...styles.card, marginBottom: "1rem" }}>
+          <div style={styles.sectionTitle}>Ink &amp; film — manual</div>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>Item</th>
+                <th style={{ ...styles.th, textAlign: "center" }}>On hand</th>
+                <th style={{ ...styles.th, textAlign: "center" }}>Alert at</th>
+                <th style={{ ...styles.th, textAlign: "center" }}>Lead time (days)</th>
+                <th style={styles.th}>Status</th>
+                <th style={styles.th} />
+              </tr>
+            </thead>
+            <tbody>
+              {manualItems.map((item) => (
+                <tr key={item.id}>
+                  <td style={{ ...styles.td, fontWeight: 600 }}>
+                    {item.name}
+                    <div style={styles.unitNote}>
+                      {item.unit}
+                      {item.barcode ? ` · barcode ${item.barcode} (pack of ${item.packSize})` : ""}
+                    </div>
+                  </td>
+                  <td style={{ ...styles.td, textAlign: "center" }}>
+                    <input
+                      key={`${item.id}:${item.effectiveQty ?? "x"}`}
+                      style={styles.qtyInput}
+                      type="number"
+                      min={0}
+                      placeholder="—"
+                      defaultValue={item.effectiveQty ?? ""}
+                      title="Type a number to record a fresh count"
+                      onBlur={(e) => {
+                        if (e.target.value !== String(item.effectiveQty ?? "")) {
+                          updateField(item.id, "qty", e.target.value);
+                        }
+                      }}
+                      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                    />
+                    {item.countedAt && (
+                      <div style={styles.countedNote}>
+                        updated {new Date(item.countedAt).toLocaleDateString()}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ ...styles.td, textAlign: "center" }}>
+                    <input
+                      style={styles.qtyInput}
+                      type="number"
+                      min={0}
+                      placeholder="—"
+                      title="Reorder alert fires when on-hand drops to this"
+                      defaultValue={item.lowAt ?? ""}
+                      onBlur={(e) => updateField(item.id, "lowAt", e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                    />
+                  </td>
+                  <td style={{ ...styles.td, textAlign: "center" }}>
+                    <input
+                      style={styles.qtyInput}
+                      type="number"
+                      min={0}
+                      placeholder="—"
+                      title="How long a resupply order takes to arrive — set Alert at high enough to cover it"
+                      defaultValue={item.leadTimeDays ?? ""}
+                      onBlur={(e) => updateField(item.id, "leadTimeDays", e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                    />
+                  </td>
+                  <td style={{ ...styles.td, color: STATUS_COLOR[item.status], fontWeight: 700, fontSize: "0.8rem" }}>
+                    {STATUS_LABEL[item.status]}
+                    {item.onOrder && (
+                      <div style={styles.onOrderNote}>
+                        on order{item.onOrder.qty ? `: ${item.onOrder.qty}` : ""}
+                        {item.onOrder.eta ? `, ETA ${new Date(item.onOrder.eta).toLocaleDateString()}` : ""}{" "}
+                        <button style={styles.cancelOrderBtn} onClick={() => cancelOrdered(item.id)} title="Cancel the on-order flag">
+                          ×
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ ...styles.td, textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button
+                      style={styles.ghostBtn}
+                      onClick={() => useOne(item.id)}
+                      disabled={!item.effectiveQty}
+                      title={`One ${item.unit.replace(/s$/, "")} finished — take it off the count`}
+                    >
+                      − Used one
+                    </button>{" "}
+                    <button style={styles.ghostBtn} onClick={() => receive(item.id, item.name)}>
+                      + Stock in
+                    </button>{" "}
+                    {!item.onOrder && (
+                      <button style={styles.ghostBtn} onClick={() => markOrdered(item.id, item.name)}>
+                        Ordered
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Packaging — calculated from Shopify order volume */}
       {!loading && (
         <div style={styles.card}>
+          <div style={styles.sectionTitle}>Packaging — calculated from orders</div>
           <table style={styles.table}>
             <thead>
               <tr>
@@ -326,7 +453,7 @@ export function StockTake() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
+              {calcItems.map((item) => (
                 <tr key={item.id}>
                   <td style={{ ...styles.td, fontWeight: 600 }}>
                     {item.name}
@@ -425,9 +552,10 @@ export function StockTake() {
       )}
 
       <p style={styles.footNote}>
-        Set each item's lead time and (for ink/film) the per-unit usage rate. Counts fill in as stock
-        is scanned or entered — projections and reorder alerts switch on automatically once an item
-        has a count, a rate, and a lead time.
+        Ink &amp; film are manual: hit "− Used one" when a bottle or roll finishes, set "Alert at" to
+        the count that should trigger a reorder flag. Packaging counts tick down automatically from
+        Shopify order volume (refreshed daily at 9am and on every visit) — set each item's lead time
+        so reorder alerts fire in time.
       </p>
     </div>
   );
@@ -548,6 +676,14 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 1px 3px var(--shadow)",
     padding: "0.75rem 1rem",
     overflowX: "auto",
+  },
+  sectionTitle: {
+    fontSize: "0.72rem",
+    fontWeight: 700,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    color: "var(--text-muted)",
+    padding: "0.3rem 0.55rem 0.5rem",
   },
   table: { width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" },
   th: {

@@ -12,6 +12,7 @@ export type NavTool =
   | "gangsheet"
   | "sentiment"
   | "stocktake"
+  | "roster"
   | "bridge";
 
 interface NavItem {
@@ -60,6 +61,12 @@ const ICONS = {
       <path d="M4 7l8 4 8-4M12 11v9" />
     </svg>
   ),
+  roster: (
+    <svg viewBox="0 0 24 24" {...stroke}>
+      <rect x="3.5" y="5" width="17" height="15.5" rx="2" />
+      <path d="M3.5 9.5h17M8 3v4M16 3v4M8.5 13.5h2M13.5 13.5h2M8.5 17h2" />
+    </svg>
+  ),
 };
 
 const HOME: NavItem = { tool: "picker", hash: "#/", label: "Home", icon: ICONS.home };
@@ -78,6 +85,7 @@ const GROUPS: { heading: string; items: NavItem[] }[] = [
     items: [
       { tool: "gangsheet", hash: "#/gangsheet", label: "Gangsheet Generator", icon: ICONS.gangsheet },
       { tool: "stocktake", hash: "#/stocktake", label: "Stock View", icon: ICONS.stocktake },
+      { tool: "roster", hash: "#/roster", label: "Roster", icon: ICONS.roster },
     ],
   },
 ];

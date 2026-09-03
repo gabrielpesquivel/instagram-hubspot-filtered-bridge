@@ -15,12 +15,15 @@ import { clog } from "../services/logger";
 // Usage rules (per the ops spec):
 //   per ORDER: 1 transfer bag, 1 wipes bag, 1 box, 1 box sleeve,
 //              1 shipping sleeve, 1 shipping label
-//   per UNIT:  ink (bottles) and film A/B (rolls) at a configurable rate
+//   MANUAL:    ink (bottles) and film A/B (rolls) — no automatic tick-down;
+//              staff mark each bottle/roll off as it's finished, and an
+//              "alert at" threshold drives the reorder flag
 //   wipes:     ceil(units-in-order / 2), summed per order server-side
 //
-// Counts are LIVE: a count is a baseline (qty at countedAt); the effective
-// on-hand shown everywhere is baseline minus what the orders since then have
-// consumed, so the number keeps ticking down between counts.
+// Calculated counts are LIVE: a count is a baseline (qty at countedAt); the
+// effective on-hand shown everywhere is baseline minus what the orders since
+// then have consumed, so the number keeps ticking down between counts. Manual
+// items only move when someone tells us (used one / stock in / scan).
 //
 // Demand spikes: projections use the hotter of the 7-day and 28-day run
 // rates (when the last week is >25% above the monthly average), so a surge
@@ -37,7 +40,7 @@ const STATS_WINDOW_DAYS = 28; // trailing window for the base rate
 const REORDER_BUFFER_DAYS = 7; // "order soon" margin on top of lead time
 const SPIKE_THRESHOLD = 1.25; // 7d rate must beat 28d rate by 25% to count
 
-type UsageKind = "perOrder" | "perUnit" | "wipes";
+type UsageKind = "perOrder" | "perUnit" | "wipes" | "manual";
 
 interface CatalogEntry {
   id: string;
@@ -47,9 +50,9 @@ interface CatalogEntry {
 }
 
 const CATALOG: CatalogEntry[] = [
-  { id: "ink", name: "Ink", unit: "bottles", usage: "perUnit" },
-  { id: "film_a", name: "Film roll A", unit: "rolls", usage: "perUnit" },
-  { id: "film_b", name: "Film roll B", unit: "rolls", usage: "perUnit" },
+  { id: "ink", name: "Ink", unit: "bottles", usage: "manual" },
+  { id: "film_a", name: "Film roll A", unit: "rolls", usage: "manual" },
+  { id: "film_b", name: "Film roll B", unit: "rolls", usage: "manual" },
   { id: "transfer_bags", name: "Transfer zip lock bags", unit: "bags", usage: "perOrder" },
   { id: "wipes_bags", name: "Alcohol wipes zip lock bags", unit: "bags", usage: "perOrder" },
   { id: "wipes", name: "Alcohol wipes", unit: "wipes", usage: "wipes" },
@@ -69,7 +72,8 @@ interface ItemState {
   qty: number | null;          // counted baseline (null = never counted)
   countedAt: string | null;    // when that baseline was set
   leadTimeDays: number | null;
-  usagePerUnit: number | null; // ink/film only — e.g. 0.004 bottles per unit
+  usagePerUnit: number | null; // perUnit items only — e.g. 0.004 bottles per unit
+  lowAt: number | null;        // manual items — reorder alert threshold
   barcode: string | null;
   packSize: number;            // units added per scan of that barcode
   onOrder: OnOrder | null;
@@ -78,11 +82,17 @@ interface ItemState {
 
 type StockViewState = Record<string, ItemState>;
 
+/** Some barcodes carry a per-box serial after a dash (LRY5326089618-20,
+ *  -21, …) — the prefix identifies the product. Store and match on the
+ *  prefix so every box of the same product hits one stored barcode. */
+const barcodeBase = (code: string): string => code.replace(/-\d+$/, "");
+
 const emptyItem = (): ItemState => ({
   qty: null,
   countedAt: null,
   leadTimeDays: null,
   usagePerUnit: null,
+  lowAt: null,
   barcode: null,
   packSize: 1,
   onOrder: null,
@@ -119,6 +129,7 @@ async function getOrderStats(env: Env): Promise<OrderConsumptionStats | null> {
 /** How much of THIS item one day's volume consumes. Null when the rate is
  *  unknowable (ink/film before usagePerUnit is set). */
 function dayUse(entry: CatalogEntry, item: ItemState, d: DailyConsumption): number | null {
+  if (entry.usage === "manual") return 0; // only moves when staff say so
   if (entry.usage === "perOrder") return d.orders;
   if (entry.usage === "wipes") return d.wipes;
   if (item.usagePerUnit == null || item.usagePerUnit <= 0) return null;
@@ -218,6 +229,33 @@ interface ProjectedItem extends CatalogEntry, ItemState {
 }
 
 function project(entry: CatalogEntry, item: ItemState, stats: OrderConsumptionStats | null): ProjectedItem {
+  // Manual items: on-hand is exactly the counted qty; the reorder flag comes
+  // from the "alert at" threshold, not a run-rate projection.
+  if (entry.usage === "manual") {
+    let status: ItemStatus =
+      item.qty == null
+        ? "uncounted"
+        : item.lowAt != null && item.qty <= item.lowAt
+        ? "order-now"
+        : "ok";
+    if (item.onOrder) {
+      const etaPassed = item.onOrder.eta && Date.parse(item.onOrder.eta) < Date.now();
+      status = etaPassed ? "order-overdue" : "on-order";
+    }
+    return {
+      ...entry,
+      ...item,
+      effectiveQty: item.qty,
+      weeklyUse: null,
+      weeklyUse28: null,
+      weeklyUse7: null,
+      spike: false,
+      daysLeft: null,
+      runoutDate: null,
+      status,
+    };
+  }
+
   const rates: Rates = stats
     ? weeklyRates(entry, item, stats)
     : { wk28: null, wk7: null, projection: null, spike: false };
@@ -329,7 +367,7 @@ export async function handleGetStockTake(request: Request, env: Env): Promise<Re
   });
 }
 
-/** POST /api/stocktake/item {id, qty?, leadTimeDays?, usagePerUnit?, packSize?, barcode?}
+/** POST /api/stocktake/item {id, qty?, leadTimeDays?, usagePerUnit?, lowAt?, packSize?, barcode?}
  *  — edit an item's settings. Setting qty establishes a fresh count baseline. */
 export async function handleStockUpdateItem(request: Request, env: Env): Promise<Response> {
   if (!(await isAuthenticated(request, env))) {
@@ -364,12 +402,18 @@ export async function handleStockUpdateItem(request: Request, env: Env): Promise
   if (lead !== undefined) item.leadTimeDays = lead == null ? null : Math.round(lead);
   const rate = num(body.usagePerUnit);
   if (rate !== undefined) item.usagePerUnit = rate;
+  const low = num(body.lowAt);
+  if (low !== undefined) item.lowAt = low == null ? null : Math.round(low);
   const pack = num(body.packSize);
   if (pack !== undefined && pack != null && pack >= 1) item.packSize = Math.round(pack);
   if (body.barcode !== undefined) {
-    const code = String(body.barcode ?? "").trim();
+    const code = barcodeBase(String(body.barcode ?? "").trim());
     // One barcode maps to one item — unassign it elsewhere first.
-    if (code) for (const other of Object.values(state)) if (other.barcode === code) other.barcode = null;
+    if (code) {
+      for (const other of Object.values(state)) {
+        if (other.barcode && barcodeBase(other.barcode) === code) other.barcode = null;
+      }
+    }
     item.barcode = code || null;
   }
   item.updatedAt = new Date().toISOString();
@@ -416,6 +460,52 @@ export async function handleStockReceive(request: Request, env: Env): Promise<Re
   const state = await getState(env);
   await registerArrival(env, state, id, qty);
   return jsonResponse({ item: { id, ...state[id] } });
+}
+
+/** POST /api/stocktake/use {id, qty?} — a bottle/roll finished (manual items
+ *  only; calculated items already tick down from order volume). */
+export async function handleStockUse(request: Request, env: Env): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+  let body: { id?: unknown; qty?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON" }, 400);
+  }
+  const id = String(body.id ?? "");
+  const entry = CATALOG.find((c) => c.id === id);
+  if (!entry) return jsonResponse({ error: "Unknown item" }, 404);
+  if (entry.usage !== "manual") {
+    return jsonResponse({ error: "Only manual items (ink/film) can be marked used" }, 400);
+  }
+  const qty = Number(body.qty ?? 1);
+  if (!Number.isInteger(qty) || qty < 1 || qty > 100) {
+    return jsonResponse({ error: "qty must be a positive integer" }, 400);
+  }
+  const state = await getState(env);
+  const item = state[id];
+  item.qty = Math.max(0, (item.qty ?? 0) - qty);
+  item.countedAt = new Date().toISOString();
+  item.updatedAt = item.countedAt;
+  await putState(env, state);
+  await clog(env, `Stock use: -${qty} ${entry.unit} ${entry.name} (${item.qty} left)`);
+  return jsonResponse({ item: { id, ...item } });
+}
+
+/** Daily cron: refresh the Shopify volume cache so on-hand estimates and the
+ *  home-page digest reflect yesterday's orders even before anyone opens the
+ *  page. Fail-soft — the next page view recomputes anyway. */
+export async function refreshStockStats(env: Env): Promise<void> {
+  try {
+    const stats = await fetchOrderConsumptionStats(env, STATS_WINDOW_DAYS);
+    await env.PROFILE_CACHE.put(STATS_CACHE_KEY, JSON.stringify(stats), {
+      expirationTtl: STATS_CACHE_TTL,
+    });
+  } catch {
+    // ignore — cache simply stays stale until the next view
+  }
 }
 
 /** POST /api/stocktake/ordered {id, eta?, qty?, cancel?} — mark an order
@@ -472,7 +562,11 @@ export async function handleStockScan(request: Request, env: Env): Promise<Respo
   }
 
   const state = await getState(env);
-  const id = Object.keys(state).find((k) => state[k].barcode === code);
+  const base = barcodeBase(code);
+  const id = Object.keys(state).find((k) => {
+    const b = state[k].barcode;
+    return b != null && (b === code || barcodeBase(b) === base);
+  });
   if (!id) {
     return jsonResponse({ matched: false, code });
   }
