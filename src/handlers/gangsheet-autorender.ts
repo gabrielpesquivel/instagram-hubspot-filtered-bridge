@@ -43,15 +43,9 @@ export async function renderDailyGangsheet(env: Env): Promise<void> {
   try {
     // Browser Rendering kills the session after 60s idle by default — far too
     // short for the Pyodide boot (~60 MB WASM). Extend to the render timeout.
-    // protocolTimeout too: waitForFunction is one long CDP call, and the 180s
-    // default killed Monday-sized (72h window) renders before completion.
-    // (Via a variable because WorkersLaunchOptions doesn't declare
-    // protocolTimeout, but the runtime forwards it to puppeteer-core.)
-    const launchOpts = {
+    browser = await puppeteer.launch(env.BROWSER, {
       keep_alive: RENDER_TIMEOUT_MS,
-      protocolTimeout: RENDER_TIMEOUT_MS,
-    };
-    browser = await puppeteer.launch(env.BROWSER, launchOpts);
+    });
     const page = await browser.newPage();
     await page.setCookie({
       name: "session",
@@ -64,11 +58,19 @@ export async function renderDailyGangsheet(env: Env): Promise<void> {
     await page.goto(`https://${env.SELF_HOST}/?autogen=${date}#/gangsheet`, {
       waitUntil: "domcontentloaded",
     });
-    await page.waitForFunction("window.__gangsheetAutoResult !== undefined", {
-      timeout: RENDER_TIMEOUT_MS,
-      polling: 2000,
-    });
-    const result = (await page.evaluate("window.__gangsheetAutoResult")) as AutoResult;
+    // Cloudflare's launch wrapper does not forward protocolTimeout. A single
+    // waitForFunction call therefore hits CDP's 180s default before our 8-minute
+    // render deadline. Poll from the Worker so each browser call returns promptly.
+    const deadline = Date.now() + RENDER_TIMEOUT_MS;
+    let result: AutoResult | undefined;
+    while (Date.now() < deadline) {
+      result = (await page.evaluate("window.__gangsheetAutoResult")) as AutoResult | undefined;
+      if (result !== undefined) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(2000, Math.max(0, deadline - Date.now()))));
+    }
+    if (result === undefined) {
+      throw new Error(`Gangsheet render/upload did not finish within ${RENDER_TIMEOUT_MS / 60_000} minutes`);
+    }
 
     if (result.ok && result.uploaded) {
       await clog(
