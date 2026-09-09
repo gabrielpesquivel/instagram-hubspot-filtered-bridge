@@ -218,7 +218,8 @@ def render(name):
     items = rest + large
 
     layout_mgr = layout.OptimizedLayoutManager()
-    placed_items = layout_mgr.place_items(items)
+    placed_items = layout_mgr.place_items(
+        items, header_factory=gangsheet_main.create_page_header_items)
 
     out_path = f'/tmp/{name}_gangsheet.pdf'
     c = pdf_utils.setup_canvas(out_path, (config.PAGE_WIDTH, config.PAGE_HEIGHT))
