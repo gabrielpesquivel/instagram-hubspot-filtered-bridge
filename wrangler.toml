@@ -3,6 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2025-02-10"
 # @cloudflare/puppeteer (gangsheet auto-render) imports node:buffer
 compatibility_flags = ["nodejs_compat"]
+# Per-version preview URLs (<version>-<worker>.workers.dev) so changes can be
+# tested against real secrets/bindings before `wrangler deploy`.
+preview_urls = true
 
 # Custom domain — UNCOMMENT once the bootink.com zone is added to this
 # Cloudflare account (DNS currently at GoDaddy; Workers custom domains

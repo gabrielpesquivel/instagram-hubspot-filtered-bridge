@@ -82,6 +82,7 @@ import {
   handlePullOrders,
   handlePullPreview,
   handleGetDailyOrders,
+  handleWipesNotes,
   storeDailyOrders,
 } from "./handlers/gangsheet-orders";
 import { renderDailyGangsheet } from "./handlers/gangsheet-autorender";
@@ -401,6 +402,9 @@ export default {
     }
     if (path === "/api/gangsheet/orders" && request.method === "GET") {
       return handlePullOrders(request, env);
+    }
+    if (path === "/api/gangsheet/wipes-notes" && request.method === "POST") {
+      return handleWipesNotes(request, env);
     }
     if (path === "/api/gangsheet/daily" && request.method === "GET") {
       return handleGetDailyOrders(request, env);

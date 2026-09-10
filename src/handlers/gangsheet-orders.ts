@@ -8,6 +8,8 @@ import {
   windowForOrderRange,
 } from "../services/shopify-api";
 import { clog, cerr } from "../services/logger";
+import type { GangsheetLineRow, GangsheetOrderMeta } from "../services/shopify-api";
+import { updateOrderNote } from "../services/shopify-api";
 
 // Daily Shopify order pull for the gangsheet generator — replaces the manual
 // 9am Matrixify CSV export. The worker shapes Admin API line items into the
@@ -50,8 +52,95 @@ export function aestDate(now = new Date()): string {
 }
 
 async function pullWindow(env: Env, fromISO: string, toISO: string) {
-  const { rows, orderCount } = await fetchGangsheetRows(env, fromISO, toISO);
-  return { csv: buildCsv(rows), orders: orderCount, items: rows.length };
+  const { rows, orderCount, orders: orderMeta } = await fetchGangsheetRows(env, fromISO, toISO);
+  return { csv: buildCsv(rows), orders: orderCount, items: rows.length, rows, orderMeta };
+}
+
+// Customer-chosen wipe count carried as a line property (e.g. "Priming
+// wipes: 6" on a REQUEST A FLAG line). That line contributes exactly N wipes
+// instead of feeding the ½-per-unit formula.
+const WIPES_PROPERTY_RE = /(?:^|\n)priming wipes?: *(\d+)\s*(?:\n|$)/i;
+
+/** Priming wipes per order, by the packing rule: ½ per unit, rounded up per
+ *  order (matches Stock View's consumption estimate). Units are the lines the
+ *  gangsheet actually prints — Priming Wipe / Shipping lines and
+ *  shopify/automatic variants (shipping, Kaching bundle placeholders) don't
+ *  count. A line carrying a "Priming wipes: N" property contributes N wipes
+ *  directly, and starter kits contribute 1 wipe per kit — both on top of the
+ *  formula for the rest. Orders whose lines are all skipped count as 0. */
+function primingWipesPerOrder(rows: GangsheetLineRow[]): Map<string, number> {
+  const unitsPerOrder = new Map<string, number>();
+  const explicitPerOrder = new Map<string, number>();
+  const addExplicit = (order: string, n: number) =>
+    explicitPerOrder.set(order, (explicitPerOrder.get(order) || 0) + n);
+  for (const r of rows) {
+    const variant = r.variantTitle.toLowerCase();
+    if (!r.lineName || r.lineName.includes("Priming Wipe") || r.lineName.includes("Shipping")) continue;
+    if (variant === "shopify" || variant === "automatic") continue;
+    const explicit = r.properties.match(WIPES_PROPERTY_RE);
+    if (explicit) {
+      addExplicit(r.orderNumber, Number(explicit[1]));
+      continue;
+    }
+    if (r.lineName.toUpperCase().includes("STARTER KIT")) {
+      addExplicit(r.orderNumber, r.quantity);
+      continue;
+    }
+    unitsPerOrder.set(r.orderNumber, (unitsPerOrder.get(r.orderNumber) || 0) + r.quantity);
+  }
+  const wipes = new Map<string, number>();
+  for (const [order, units] of unitsPerOrder) wipes.set(order, Math.ceil(units / 2));
+  for (const [order, n] of explicitPerOrder) wipes.set(order, (wipes.get(order) || 0) + n);
+  return wipes;
+}
+
+const WIPES_LINE_RE = /^PRIMING WIPES: \d+$/m;
+
+/** The order's note with "PRIMING WIPES: <n>" as its first line — replaces a
+ *  previous wipes line (cron rerun), otherwise prepends above the existing
+ *  staff note. */
+function noteWithWipesLine(existingNote: string, wipes: number): string {
+  const line = `PRIMING WIPES: ${wipes}`;
+  if (WIPES_LINE_RE.test(existingNote)) return existingNote.replace(WIPES_LINE_RE, line);
+  return existingNote.trim() ? `${line}\n\n${existingNote}` : line;
+}
+
+/** Write each pulled order's wipe count into its Shopify order note so staff
+ *  see "PRIMING WIPES: X" in the order view while picking. Idempotent —
+ *  reruns update the existing line. Fail-soft per order; returns a summary. */
+async function annotateOrdersWithWipes(
+  env: Env,
+  orderMeta: GangsheetOrderMeta[],
+  rows: GangsheetLineRow[]
+): Promise<{ updated: number; unchanged: number; failed: string[]; totalWipes: number; results: { order: string; wipes: number; note: string }[] }> {
+  const wipesByOrder = primingWipesPerOrder(rows);
+  let updated = 0;
+  let unchanged = 0;
+  let totalWipes = 0;
+  const failed: string[] = [];
+  const results: { order: string; wipes: number; note: string }[] = [];
+  // Small batches: ~150 orders/day, one mutation each — parallel enough to
+  // finish fast, serial enough to stay clear of API throttling.
+  const BATCH = 5;
+  for (let i = 0; i < orderMeta.length; i += BATCH) {
+    await Promise.all(orderMeta.slice(i, i + BATCH).map(async (order) => {
+      const wipes = wipesByOrder.get(order.number) || 0;
+      totalWipes += wipes;
+      const note = noteWithWipesLine(order.note, wipes);
+      results.push({ order: order.number, wipes, note });
+      if (note === order.note) {
+        unchanged++;
+        return;
+      }
+      try {
+        await updateOrderNote(env, order.id, note);
+        updated++;
+      } catch (error) {
+        failed.push(`#${order.number}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }));
+  }
+  return { updated, unchanged, failed, totalWipes, results };
 }
 
 // GET /api/gangsheet/orders?from=<ISO>&to=<ISO> — on-demand pull. Defaults to
@@ -138,6 +227,39 @@ export async function handlePullPreview(request: Request, env: Env): Promise<Res
   }
 }
 
+// POST /api/gangsheet/wipes-notes {fromOrder, toOrder} — manually run the
+// priming-wipes note stamping for an inclusive order-number range (testing /
+// backfill; the 9am cron does the daily pull automatically).
+export async function handleWipesNotes(request: Request, env: Env): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+  if (!shopifyConfigured(env)) {
+    return jsonResponse({ error: "Shopify is not configured" }, 503);
+  }
+  let body: { fromOrder?: unknown; toOrder?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON" }, 400);
+  }
+  const lo = Number(body.fromOrder);
+  const hi = Number(body.toOrder);
+  if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo <= 0 || hi <= 0) {
+    return jsonResponse({ error: "fromOrder and toOrder are required" }, 400);
+  }
+  try {
+    const { rows, orders: orderMeta } = await fetchGangsheetRowsByOrderRange(env, lo, hi);
+    const { updated, unchanged, failed, totalWipes, results } = await annotateOrdersWithWipes(env, orderMeta, rows);
+    return jsonResponse({ updated, unchanged, failed, totalWipes, results });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Wipes-note run failed";
+    if (message.includes("not found")) return jsonResponse({ error: message }, 404);
+    await cerr(env, "Wipes-note run error:", error);
+    return jsonResponse({ error: message }, 502);
+  }
+}
+
 // GET /api/gangsheet/daily?date=YYYY-MM-DD — the cron-stored pull for a day
 // (default: today AEST). 404 when the cron hasn't run or found nothing.
 export async function handleGetDailyOrders(request: Request, env: Env): Promise<Response> {
@@ -186,12 +308,22 @@ export async function storeDailyOrders(env: Env): Promise<boolean> {
   const from = new Date(now.getTime() - fromHoursAgo * 3600_000).toISOString();
   const to = new Date(now.getTime() - toHoursAgo * 3600_000).toISOString();
   try {
-    const { csv, orders, items } = await pullWindow(env, from, to);
+    const { csv, orders, items, rows, orderMeta } = await pullWindow(env, from, to);
     const date = aestDate(now);
     await env.GANGSHEET_FILES.put(`${DAILY_PREFIX}${date}.csv`, csv, {
       httpMetadata: { contentType: "text/csv" },
       customMetadata: { orders: String(orders), items: String(items), pulledAt: now.toISOString() },
     });
+    // Stamp "PRIMING WIPES: X" into each order's Shopify note so pickers see
+    // the count in the order view. Fail-soft: note trouble shouldn't kill the
+    // pull.
+    try {
+      const { updated, unchanged, failed, totalWipes } = await annotateOrdersWithWipes(env, orderMeta, rows);
+      await clog(env, `Priming-wipes notes: ${updated} updated, ${unchanged} unchanged, ${failed.length} failed — ${totalWipes} wipes total`);
+      if (failed.length) await cerr(env, "Priming-wipes note failures:", failed.join("; "));
+    } catch (error) {
+      await cerr(env, "Priming-wipes note pass failed:", error);
+    }
     await clog(env, `Daily gangsheet pull stored: ${date} — ${orders} orders, ${items} line items`);
     return true;
   } catch (error) {

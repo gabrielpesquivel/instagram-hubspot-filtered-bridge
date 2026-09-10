@@ -232,11 +232,17 @@ export interface GangsheetLineRow {
   properties: string;       // newline-joined "key: value" pairs, values \:-escaped
 }
 
+export interface GangsheetOrderMeta {
+  id: string;               // GID, for orderUpdate
+  number: string;           // "12646" (no #)
+  note: string;             // current staff note ("" if none)
+}
+
 const GANGSHEET_ORDERS_QUERY = `query($q: String!, $n: Int!, $cursor: String) {
   orders(first: $n, after: $cursor, query: $q, sortKey: CREATED_AT) {
     pageInfo { hasNextPage endCursor }
     edges { node {
-      name cancelledAt
+      id name note cancelledAt
       lineItems(first: 100) { edges { node {
         name variantTitle currentQuantity
         customAttributes { key value }
@@ -256,9 +262,11 @@ export async function fetchGangsheetRows(
   // Optional inclusive order-number filter applied on top of the date window
   // (used by the order-range pull, where the window merely brackets the range).
   orderRange?: { lo: number; hi: number }
-): Promise<{ rows: GangsheetLineRow[]; orderCount: number }> {
+): Promise<{ rows: GangsheetLineRow[]; orderCount: number; orders: GangsheetOrderMeta[] }> {
   type Node = {
+    id: string;
     name: string;
+    note: string | null;
     cancelledAt: string | null;
     lineItems: { edges: { node: {
       name: string; variantTitle: string | null; currentQuantity: number;
@@ -267,6 +275,7 @@ export async function fetchGangsheetRows(
   };
   const q = `created_at:>='${fromISO}' created_at:<'${toISO}'`;
   const rows: GangsheetLineRow[] = [];
+  const orders: GangsheetOrderMeta[] = [];
   let orderCount = 0;
   let cursor: string | null = null;
   // 20 pages × 50 = 1000 orders — far above any real day; guards a runaway loop.
@@ -281,6 +290,7 @@ export async function fetchGangsheetRows(
         if (!(num >= orderRange.lo && num <= orderRange.hi)) continue;
       }
       orderCount++;
+      orders.push({ id: node.id, number: node.name.replace(/^#/, ""), note: node.note || "" });
       for (const { node: li } of node.lineItems.edges) {
         if (li.currentQuantity <= 0) continue; // fully refunded/removed
         const properties = li.customAttributes
@@ -298,7 +308,19 @@ export async function fetchGangsheetRows(
     if (!data.orders.pageInfo.hasNextPage) break;
     cursor = data.orders.pageInfo.endCursor;
   }
-  return { rows, orderCount };
+  return { rows, orderCount, orders };
+}
+
+/** Overwrite the staff note on an order (orderUpdate replaces the whole
+ *  field — callers must merge with the existing note themselves). */
+export async function updateOrderNote(env: Env, orderId: string, note: string): Promise<void> {
+  const data = await adminGraphQL<{ orderUpdate: { userErrors: { field?: string[]; message: string }[] } }>(
+    env,
+    ORDER_UPDATE,
+    { input: { id: orderId, note } }
+  );
+  const err = joinUserErrors(data.orderUpdate.userErrors);
+  if (err) throw new Error(err);
 }
 
 /** createdAt of a single order looked up by number — used to anchor the
@@ -361,7 +383,7 @@ export async function fetchGangsheetRowsByOrderRange(
   env: Env,
   fromOrder: number,
   toOrder: number
-): Promise<{ rows: GangsheetLineRow[]; orderCount: number }> {
+): Promise<{ rows: GangsheetLineRow[]; orderCount: number; orders: GangsheetOrderMeta[] }> {
   const [lo, hi] = fromOrder <= toOrder ? [fromOrder, toOrder] : [toOrder, fromOrder];
   const [loCreated, hiCreated] = await Promise.all([
     orderCreatedAt(env, lo),
