@@ -51,6 +51,14 @@ export function aestDate(now = new Date()): string {
   return new Date(now.getTime() + 10 * 3600_000).toISOString().slice(0, 10);
 }
 
+/** Date label for today's daily pull/render. Sunday's pull is labelled with
+ *  Monday's date so the CSV and rendered sheets land where the Mon–Fri file
+ *  calendar, digest, and "today" defaults look. */
+export function dailyPullDate(now = new Date()): string {
+  const aestDay = new Date(now.getTime() + 10 * 3600_000).getUTCDay();
+  return aestDate(aestDay === 0 ? new Date(now.getTime() + 24 * 3600_000) : now);
+}
+
 async function pullWindow(env: Env, fromISO: string, toISO: string) {
   const { rows, orderCount, orders: orderMeta } = await fetchGangsheetRows(env, fromISO, toISO);
   return { csv: buildCsv(rows), orders: orderCount, items: rows.length, rows, orderMeta };
@@ -289,27 +297,28 @@ export async function handleGetDailyOrders(request: Request, env: Env): Promise<
  *  with the AEST date. Overwrites any earlier pull for the same day (rerunning
  *  the cron refreshes the snapshot). Fail-soft — a bad day logs and moves on.
  *
- *  Weekends (AEST) are skipped entirely. To spread the weekend load, Monday's
- *  pull covers Friday 9am → Sunday 9am and Tuesday's covers Sunday 9am →
- *  Tuesday 9am (48h each); Wed–Fri stay 24h. Returns whether a pull was
- *  stored, so the caller can skip the render on weekend days. */
+ *  Saturday and Monday (AEST) are skipped entirely. To spread the weekend
+ *  load, Sunday's pull covers Friday 9am → Sunday 9am (stored under Monday's
+ *  date — see dailyPullDate) and Tuesday's covers Sunday 9am → Tuesday 9am
+ *  (48h each); Wed–Fri stay 24h. Returns whether a pull was stored, so the
+ *  caller can skip the render on skipped days. */
 export async function storeDailyOrders(env: Env): Promise<boolean> {
   if (!shopifyConfigured(env)) return false;
   const now = new Date();
   // Day of week in AEST (0 = Sunday … 6 = Saturday)
   const aestDay = new Date(now.getTime() + 10 * 3600_000).getUTCDay();
-  if (aestDay === 6 || aestDay === 0) {
-    await clog(env, "Daily gangsheet pull skipped: weekend (covered by Monday/Tuesday pulls)");
+  if (aestDay === 6 || aestDay === 1) {
+    await clog(env, "Daily gangsheet pull skipped (covered by Sunday/Tuesday pulls)");
     return false;
   }
-  // Monday: Fri 9am → Sun 9am; Tuesday: Sun 9am → Tue 9am; else last 24h
-  const fromHoursAgo = aestDay === 1 ? 72 : aestDay === 2 ? 48 : 24;
-  const toHoursAgo = aestDay === 1 ? 24 : 0;
+  // Sunday: Fri 9am → Sun 9am; Tuesday: Sun 9am → Tue 9am; else last 24h
+  const fromHoursAgo = aestDay === 0 || aestDay === 2 ? 48 : 24;
+  const toHoursAgo = 0;
   const from = new Date(now.getTime() - fromHoursAgo * 3600_000).toISOString();
   const to = new Date(now.getTime() - toHoursAgo * 3600_000).toISOString();
   try {
     const { csv, orders, items, rows, orderMeta } = await pullWindow(env, from, to);
-    const date = aestDate(now);
+    const date = dailyPullDate(now);
     await env.GANGSHEET_FILES.put(`${DAILY_PREFIX}${date}.csv`, csv, {
       httpMetadata: { contentType: "text/csv" },
       customMetadata: { orders: String(orders), items: String(items), pulledAt: now.toISOString() },

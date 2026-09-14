@@ -539,7 +539,7 @@ export default {
         ctx.waitUntil(refreshMetaTokenIfNeeded(env));
         break;
       case "0 23 * * *":
-        // Weekends (AEST) store nothing — skip the render too.
+        // Saturday/Monday (AEST) store nothing — skip the render too.
         ctx.waitUntil(storeDailyOrders(env).then((stored) => (stored ? renderDailyGangsheet(env) : undefined)));
         ctx.waitUntil(refreshStockStats(env)); // stock estimates pick up yesterday's orders
         break;

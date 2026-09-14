@@ -1,7 +1,7 @@
 import puppeteer from "@cloudflare/puppeteer";
 import type { Env } from "../types";
 import { clog, cerr } from "../services/logger";
-import { aestDate, DAILY_PREFIX } from "./gangsheet-orders";
+import { dailyPullDate, DAILY_PREFIX } from "./gangsheet-orders";
 
 // Fully automatic daily gangsheet: after the 23:00 UTC (~9am AEST) order pull
 // is stored, Browser Rendering opens the dashboard's own gangsheet page in
@@ -23,7 +23,8 @@ interface AutoResult {
 
 /** Cron entry (chained after storeDailyOrders). Fail-soft — logs and returns. */
 export async function renderDailyGangsheet(env: Env): Promise<void> {
-  const date = aestDate();
+  // Matches the pull's label (Sunday's run is stored under Monday's date).
+  const date = dailyPullDate();
   const stored = await env.GANGSHEET_FILES.get(`${DAILY_PREFIX}${date}.csv`);
   if (!stored) {
     await clog(env, `Auto gangsheet skipped: no stored pull for ${date}`);
