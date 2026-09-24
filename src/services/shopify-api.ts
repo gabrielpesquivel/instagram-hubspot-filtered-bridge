@@ -230,6 +230,7 @@ export interface GangsheetLineRow {
   variantTitle: string;
   quantity: number;         // currentQuantity — refunds/removals already deducted
   properties: string;       // newline-joined "key: value" pairs, values \:-escaped
+  note: string;             // the order's staff note — fills missing custom values
 }
 
 export interface GangsheetOrderMeta {
@@ -302,6 +303,7 @@ export async function fetchGangsheetRows(
           variantTitle: li.variantTitle && li.variantTitle !== "Default Title" ? li.variantTitle : "",
           quantity: li.currentQuantity,
           properties,
+          note: node.note || "",
         });
       }
     }

@@ -21,15 +21,17 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // The generator's parser reads exactly these columns (see main.py
 // collect_items_from_csv). Line: Type is always "Line Item" — cancelled orders
-// and refunded quantities are already filtered out API-side.
-const CSV_HEADER = 'Number,"Line: Type","Line: Name","Line: Variant Title","Line: Quantity","Line: Properties","Refund: ID"';
+// and refunded quantities are already filtered out API-side. Note carries the
+// order's staff note (as pulled — before the wipes stamp) so the generator can
+// fill custom values missing from line properties ("NAME: JACK, NUMBER: 4").
+const CSV_HEADER = 'Number,"Line: Type","Line: Name","Line: Variant Title","Line: Quantity","Line: Properties","Refund: ID",Note';
 
 function csvField(value: string): string {
   if (/[",\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
   return value;
 }
 
-function buildCsv(rows: { orderNumber: string; lineName: string; variantTitle: string; quantity: number; properties: string }[]): string {
+function buildCsv(rows: GangsheetLineRow[]): string {
   const lines = [CSV_HEADER];
   for (const r of rows) {
     lines.push([
@@ -40,6 +42,7 @@ function buildCsv(rows: { orderNumber: string; lineName: string; variantTitle: s
       String(r.quantity),
       csvField(r.properties),
       "", // Refund: ID — refunds already deducted via currentQuantity
+      csvField(r.note),
     ].join(","));
   }
   return lines.join("\n");
