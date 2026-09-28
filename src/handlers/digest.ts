@@ -41,7 +41,7 @@ export async function handleDigest(request: Request, env: Env): Promise<Response
     (async () => {
       const token = await getValidGoogleToken(env);
       if (!token) return null;
-      const threads = await listUnreadThreads(token);
+      const threads = await listUnreadThreads(token, 25, env.PROFILE_CACHE);
       return threads.filter((t) => Date.parse(t.date) >= cutoff).length;
     })().catch(() => null),
     (async () => {

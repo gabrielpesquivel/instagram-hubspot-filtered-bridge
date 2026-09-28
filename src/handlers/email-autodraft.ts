@@ -47,7 +47,7 @@ export async function autoDraftEmails(env: Env): Promise<void> {
   if (!conn || !token) return;
 
   try {
-    const threads = await listUnreadThreads(token);
+    const threads = await listUnreadThreads(token, 25, env.PROFILE_CACHE);
     let drafted = 0;
     for (const t of threads) {
       if (drafted >= MAX_PER_RUN) break;

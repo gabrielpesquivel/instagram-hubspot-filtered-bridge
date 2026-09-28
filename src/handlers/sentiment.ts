@@ -128,7 +128,7 @@ async function collectNewMessages(env: Env, cursor: Cursor): Promise<NewMessage[
   try {
     const token = await getValidGoogleToken(env);
     if (token) {
-      for (const t of await listUnreadThreads(token)) {
+      for (const t of await listUnreadThreads(token, 25, env.PROFILE_CACHE)) {
         const id = `em:${t.messageId}`;
         if (seen.has(id) || !fresh(t.date)) continue;
         out.push({

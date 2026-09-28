@@ -186,70 +186,108 @@ function emailAddress(from: string): string {
   return (m ? m[1] : from).trim().toLowerCase();
 }
 
-/** GET with one retry on 429/5xx — a silent null here used to drop threads
- *  from the queue with no trace. */
+/** GET with backoff retries on 429/5xx — a silent null here used to drop
+ *  threads from the queue with no trace. */
 async function gmailGetRetry<T>(path: string, token: string): Promise<T | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     const res = await fetch(`${GMAIL_BASE}${path}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (res.ok) return (await res.json()) as T;
     if (res.status !== 429 && res.status < 500) break;
-    await new Promise((r) => setTimeout(r, 500));
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
   }
   console.error(`Gmail GET failed: ${path.split("?")[0]}`);
   return null;
 }
 
+// Thread summaries cached by Gmail historyId (changes whenever the thread
+// does), so a poll only re-fetches new/changed threads. Fetching all 200 on
+// every 30s poll blew Gmail's per-user rate limit and emptied the queue.
+const SUMMARY_CACHE_KEY = "gmail_thread_summaries";
+type SummaryCache = Record<string, { historyId: string; summary: EmailThreadSummary }>;
+
 /** Unread inbox threads, newest first. `max` counts threads (conversations),
  *  not messages, and pages through Gmail until that many are found or the
  *  unread queue is exhausted — previously a single 50-message page meant a
- *  busy weekend pushed Friday's threads out of the queue. */
+ *  busy weekend pushed Friday's threads out of the queue. Throws if Gmail
+ *  can't list the queue, so callers keep what they have instead of showing
+ *  an empty inbox. Pass `cache` (KV) to reuse unchanged thread summaries. */
 export async function listUnreadThreads(
   token: string,
-  max = 25
+  max = 25,
+  cache?: KVNamespace
 ): Promise<EmailThreadSummary[]> {
   const q = encodeURIComponent("is:unread in:inbox");
-  const ids: string[] = [];
+  const listed: { id: string; historyId: string }[] = [];
   let pageToken = "";
   do {
-    const page = await gmailGetRetry<{ threads?: { id: string }[]; nextPageToken?: string }>(
-      `/threads?q=${q}&maxResults=${Math.min(100, max - ids.length)}${pageToken ? `&pageToken=${pageToken}` : ""}`,
+    const page = await gmailGetRetry<{ threads?: { id: string; historyId: string }[]; nextPageToken?: string }>(
+      `/threads?q=${q}&maxResults=${Math.min(100, max - listed.length)}${pageToken ? `&pageToken=${pageToken}` : ""}`,
       token
     );
-    if (!page) break;
-    for (const t of page.threads || []) ids.push(t.id);
+    if (!page) throw new Error("Gmail thread list failed");
+    listed.push(...(page.threads || []));
     pageToken = page.nextPageToken || "";
-  } while (pageToken && ids.length < max);
+  } while (pageToken && listed.length < max);
 
-  // Fetch metadata in small parallel batches (Gmail rate-limits bursts).
-  const summaries: EmailThreadSummary[] = [];
-  const BATCH = 10;
-  for (let i = 0; i < ids.length; i += BATCH) {
+  let cached: SummaryCache = {};
+  if (cache) {
+    try {
+      cached = (await cache.get<SummaryCache>(SUMMARY_CACHE_KEY, "json")) || {};
+    } catch { /* corrupt — rebuild */ }
+  }
+
+  // Fetch metadata only for threads that are new or changed, in small
+  // parallel batches (Gmail rate-limits bursts).
+  const fresh: SummaryCache = {};
+  const stale = listed.filter((t) => cached[t.id]?.historyId !== t.historyId);
+  const BATCH = 5;
+  for (let i = 0; i < stale.length; i += BATCH) {
     const batch = await Promise.all(
-      ids.slice(i, i + BATCH).map((id) =>
-        gmailGetRetry<{ id: string; messages?: GmailMessage[] }>(
-          `/threads/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+      stale.slice(i, i + BATCH).map((t) =>
+        gmailGetRetry<{ id: string; historyId?: string; messages?: GmailMessage[] }>(
+          `/threads/${t.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
           token
         )
       )
     );
-    for (const thread of batch) {
+    batch.forEach((thread, j) => {
       const msgs = thread?.messages || [];
       // Summarise by the newest unread message (what the customer last sent).
       const msg = [...msgs].reverse().find((m) => m.labelIds?.includes("UNREAD")) || msgs[msgs.length - 1];
-      if (!thread || !msg) continue;
+      if (!thread || !msg) return;
       const from = getHeader(msg.payload, "From");
-      summaries.push({
-        threadId: thread.id,
-        messageId: msg.id,
-        from,
-        fromName: parseFromName(from),
-        subject: getHeader(msg.payload, "Subject") || "(no subject)",
-        date: getHeader(msg.payload, "Date"),
-        snippet: msg.snippet || "",
-      });
-    }
+      fresh[thread.id] = {
+        historyId: stale[i + j].historyId,
+        summary: {
+          threadId: thread.id,
+          messageId: msg.id,
+          from,
+          fromName: parseFromName(from),
+          subject: getHeader(msg.payload, "Subject") || "(no subject)",
+          date: getHeader(msg.payload, "Date"),
+          snippet: msg.snippet || "",
+        },
+      };
+    });
+  }
+
+  // Keep list order (newest first). A failed fetch falls back to the older
+  // cached summary rather than dropping the thread from the queue.
+  const next: SummaryCache = {};
+  const summaries: EmailThreadSummary[] = [];
+  for (const t of listed) {
+    const entry = fresh[t.id] || cached[t.id];
+    if (!entry) continue;
+    next[t.id] = entry;
+    summaries.push(entry.summary);
+  }
+  // Only the full-queue caller (Email Manager, max 200) prunes the cache;
+  // the 25-thread cron callers merge so they don't evict older threads.
+  if (cache && Object.keys(fresh).length) {
+    const merged = max >= 200 ? next : { ...cached, ...next };
+    await cache.put(SUMMARY_CACHE_KEY, JSON.stringify(merged)).catch(() => {});
   }
   return summaries;
 }
