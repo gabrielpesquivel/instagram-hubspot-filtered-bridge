@@ -103,7 +103,7 @@ export async function handleGetEmailThreads(request: Request, env: Env): Promise
   const token = await getValidGoogleToken(env);
   if (!token) return jsonResponse({ error: "Gmail not connected" }, 409);
   try {
-    const threads = await listUnreadThreads(token, 50);
+    const threads = await listUnreadThreads(token, 200);
     return jsonResponse({ threads });
   } catch (error) {
     await cerr(env, "List email threads error:", error);

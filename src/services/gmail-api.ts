@@ -52,6 +52,7 @@ interface GmailMessage {
   id: string;
   threadId: string;
   snippet?: string;
+  labelIds?: string[];
   payload?: GmailPayloadPart;
 }
 
@@ -185,37 +186,70 @@ function emailAddress(from: string): string {
   return (m ? m[1] : from).trim().toLowerCase();
 }
 
-/** Unread inbox threads, newest first, deduped to one entry per thread. */
+/** GET with one retry on 429/5xx — a silent null here used to drop threads
+ *  from the queue with no trace. */
+async function gmailGetRetry<T>(path: string, token: string): Promise<T | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(`${GMAIL_BASE}${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) return (await res.json()) as T;
+    if (res.status !== 429 && res.status < 500) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  console.error(`Gmail GET failed: ${path.split("?")[0]}`);
+  return null;
+}
+
+/** Unread inbox threads, newest first. `max` counts threads (conversations),
+ *  not messages, and pages through Gmail until that many are found or the
+ *  unread queue is exhausted — previously a single 50-message page meant a
+ *  busy weekend pushed Friday's threads out of the queue. */
 export async function listUnreadThreads(
   token: string,
   max = 25
 ): Promise<EmailThreadSummary[]> {
-  const list = await gmailGet<{ messages?: { id: string; threadId: string }[] }>(
-    `/messages?q=${encodeURIComponent("is:unread in:inbox")}&maxResults=${max}`,
-    token
-  );
-  if (!list?.messages?.length) return [];
-
-  const seen = new Set<string>();
-  const summaries: EmailThreadSummary[] = [];
-  for (const { id } of list.messages) {
-    const msg = await gmailGet<GmailMessage>(
-      `/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+  const q = encodeURIComponent("is:unread in:inbox");
+  const ids: string[] = [];
+  let pageToken = "";
+  do {
+    const page = await gmailGetRetry<{ threads?: { id: string }[]; nextPageToken?: string }>(
+      `/threads?q=${q}&maxResults=${Math.min(100, max - ids.length)}${pageToken ? `&pageToken=${pageToken}` : ""}`,
       token
     );
-    if (!msg) continue;
-    if (seen.has(msg.threadId)) continue;
-    seen.add(msg.threadId);
-    const from = getHeader(msg.payload, "From");
-    summaries.push({
-      threadId: msg.threadId,
-      messageId: msg.id,
-      from,
-      fromName: parseFromName(from),
-      subject: getHeader(msg.payload, "Subject") || "(no subject)",
-      date: getHeader(msg.payload, "Date"),
-      snippet: msg.snippet || "",
-    });
+    if (!page) break;
+    for (const t of page.threads || []) ids.push(t.id);
+    pageToken = page.nextPageToken || "";
+  } while (pageToken && ids.length < max);
+
+  // Fetch metadata in small parallel batches (Gmail rate-limits bursts).
+  const summaries: EmailThreadSummary[] = [];
+  const BATCH = 10;
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const batch = await Promise.all(
+      ids.slice(i, i + BATCH).map((id) =>
+        gmailGetRetry<{ id: string; messages?: GmailMessage[] }>(
+          `/threads/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+          token
+        )
+      )
+    );
+    for (const thread of batch) {
+      const msgs = thread?.messages || [];
+      // Summarise by the newest unread message (what the customer last sent).
+      const msg = [...msgs].reverse().find((m) => m.labelIds?.includes("UNREAD")) || msgs[msgs.length - 1];
+      if (!thread || !msg) continue;
+      const from = getHeader(msg.payload, "From");
+      summaries.push({
+        threadId: thread.id,
+        messageId: msg.id,
+        from,
+        fromName: parseFromName(from),
+        subject: getHeader(msg.payload, "Subject") || "(no subject)",
+        date: getHeader(msg.payload, "Date"),
+        snippet: msg.snippet || "",
+      });
+    }
   }
   return summaries;
 }
