@@ -6,7 +6,11 @@ export default defineConfig({
   define: {
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },
+  // mupdf (Cut Files page) loads its WASM with top-level await.
+  worker: { format: "es" },
+  optimizeDeps: { exclude: ["mupdf"] },
   build: {
+    target: "es2022",
     outDir: "../public",
     emptyOutDir: true,
   },

@@ -5,6 +5,7 @@ import { ToolPicker } from "./ToolPicker";
 import { InboxPage } from "./InboxPage";
 import { EmailManager } from "./EmailManager";
 import { Gangsheet } from "./Gangsheet";
+import { CutFiles } from "./CutFiles";
 import { DmManager } from "./DmManager";
 import { Sentiment } from "./Sentiment";
 import { StockTake } from "./StockTake";
@@ -18,6 +19,7 @@ const TITLES: Record<NavTool, string> = {
   email: "Email Manager",
   dms: "Instagram DMs",
   gangsheet: "Gangsheet Generator",
+  cutfiles: "Print Prep",
   sentiment: "Customer Sentiment",
   stocktake: "Stock View",
   roster: "Roster",
@@ -29,6 +31,7 @@ function toolFromHash(): NavTool {
   if (hash.startsWith("#/dms")) return "dms";
   if (hash.startsWith("#/bridge")) return "bridge";
   if (hash.startsWith("#/gangsheet")) return "gangsheet";
+  if (hash.startsWith("#/printprep") || hash.startsWith("#/cutfiles")) return "cutfiles";
   if (hash.startsWith("#/email")) return "email";
   if (hash.startsWith("#/support")) return "support";
   if (hash.startsWith("#/sentiment")) return "sentiment";
@@ -71,6 +74,7 @@ export function App() {
   else if (tool === "bridge") page = <Dashboard />;
   else if (tool === "dms") page = <DmManager />;
   else if (tool === "gangsheet") page = <Gangsheet />;
+  else if (tool === "cutfiles") page = <CutFiles />;
   else if (tool === "sentiment") page = <Sentiment />;
   else if (tool === "stocktake") page = <StockTake />;
   else if (tool === "roster") page = <Roster />;

@@ -10,6 +10,7 @@ export type NavTool =
   | "email"
   | "dms"
   | "gangsheet"
+  | "cutfiles"
   | "sentiment"
   | "stocktake"
   | "roster"
@@ -48,6 +49,13 @@ const ICONS = {
       <path d="M4 9h16M4 14.5h16M9.5 9v11.5" />
     </svg>
   ),
+  cutfiles: (
+    <svg viewBox="0 0 24 24" {...stroke}>
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12" />
+    </svg>
+  ),
   sentiment: (
     <svg viewBox="0 0 24 24" {...stroke}>
       <circle cx="12" cy="12" r="8.5" />
@@ -84,6 +92,7 @@ const GROUPS: { heading: string; items: NavItem[] }[] = [
     heading: "Operations",
     items: [
       { tool: "gangsheet", hash: "#/gangsheet", label: "Gangsheet Generator", icon: ICONS.gangsheet },
+      { tool: "cutfiles", hash: "#/printprep", label: "Print Prep", icon: ICONS.cutfiles },
       { tool: "stocktake", hash: "#/stocktake", label: "Stock View", icon: ICONS.stocktake },
       { tool: "roster", hash: "#/roster", label: "Roster", icon: ICONS.roster },
     ],
