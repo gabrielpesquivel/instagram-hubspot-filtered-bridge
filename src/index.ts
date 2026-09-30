@@ -108,6 +108,7 @@ import { handleGetShopReviews, handlePostShopReviews } from "./handlers/shop-rev
 import { handleGetNotes, handlePutNotes } from "./handlers/notes";
 import { handleGetRoster, handlePutRoster } from "./handlers/roster";
 import { handleSiteStatus, recordSitePing } from "./handlers/site-status";
+import { handleGetOrderGlobe, handleOrderGlobeBackfill, handleOrderGlobeRefresh, syncOrderGlobe } from "./handlers/order-globe";
 import { autoDraftEmails } from "./handlers/email-autodraft";
 import {
   handleGoogleAuthInit,
@@ -475,6 +476,17 @@ export default {
       return handleSiteStatus(request, env);
     }
 
+    // Order globe (home-page hero): all-time order map + in-transit arcs
+    if (path === "/api/orders/globe" && request.method === "GET") {
+      return handleGetOrderGlobe(request, env, ctx);
+    }
+    if (path === "/api/orders/globe/backfill" && request.method === "POST") {
+      return handleOrderGlobeBackfill(request, env);
+    }
+    if (path === "/api/orders/globe/refresh" && request.method === "POST") {
+      return handleOrderGlobeRefresh(request, env);
+    }
+
     // Home-page scratchpad notes (persist across days)
     if (path === "/api/notes" && request.method === "GET") {
       return handleGetNotes(request, env);
@@ -547,6 +559,7 @@ export default {
         ctx.waitUntil(autoDraftEmails(env));
         ctx.waitUntil(recordSitePing(env)); // 24h response-time history
         ctx.waitUntil(scanSentiment(env)); // fold new DMs/emails into the issue log
+        ctx.waitUntil(syncOrderGlobe(env)); // order globe: backfill/new orders/in-transit
         break;
     }
   },

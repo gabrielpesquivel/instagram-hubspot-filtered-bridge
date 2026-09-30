@@ -523,7 +523,7 @@ interface GraphQLResult<T> { data?: T; errors?: { message: string }[]; }
 /** POST an arbitrary Admin GraphQL query/mutation. Throws on transport, HTTP,
  *  or top-level GraphQL errors. userErrors on mutation payloads are the
  *  caller's responsibility to check. */
-async function adminGraphQL<T>(env: Env, query: string, variables: Record<string, unknown>): Promise<T> {
+export async function adminGraphQL<T>(env: Env, query: string, variables: Record<string, unknown>): Promise<T> {
   const token = await getAccessToken(env);
   if (!token) throw new Error("Shopify not configured (no access token)");
   const res = await fetch(GRAPHQL_ENDPOINT(env), {

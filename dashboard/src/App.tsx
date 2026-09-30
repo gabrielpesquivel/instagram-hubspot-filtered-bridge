@@ -14,7 +14,7 @@ import { SideNav, type NavTool } from "./SideNav";
 import { TopBar } from "./TopBar";
 
 const TITLES: Record<NavTool, string> = {
-  picker: "Home",
+  picker: "WELCOME TO BOOTINK HUB",
   support: "Support Assistant",
   email: "Email Manager",
   dms: "Instagram DMs",

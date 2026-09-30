@@ -267,3 +267,118 @@ button {
 .ce-editor:focus {
   outline: none;
 }
+
+/* ── Order globe (OrderGlobeCard.tsx) ──────────────────────────────────────
+   Light = atlas print: paper card, pale sphere, halftone land. Dark =
+   night-side Earth on deep navy. Both: flat green hexagon order heatmap +
+   green accents (the site monitor's Live green). Globe WebGL colours live
+   in GLOBE_THEME in the component; these cover the card chrome + tooltips. */
+:root {
+  --og-bg: radial-gradient(ellipse 70% 90% at 30% 45%, #ffffff 0%, #f6f7fb 55%, #eef0f6 100%);
+  --og-border: var(--border);
+  --og-panel: rgba(255, 255, 255, 0.78);
+  --og-overlay: rgba(255, 255, 255, 0.94);
+  --og-line: #e4e6ee;
+  --og-text: #171a24;
+  --og-muted: #6b7285;
+  --og-faint: #9aa0b2;
+  --og-amber: #c25e00;
+  --og-accent: #2e7d32;
+  --og-ripple: #2e7d32;
+  --og-arc: linear-gradient(90deg, #c2410c, #f97316, #eab308, #16a34a);
+  --og-track: #eef0f5;
+  --og-bar: linear-gradient(90deg, #a5d6a7, #2e7d32);
+  --og-ramp: linear-gradient(90deg, #c8e6c9, #81c784, #2e7d32, #14501a);
+  --og-board: #f7f8fb;
+  --og-board-line: #eceef4;
+  --og-s-label: #5b6fd6;
+  --og-s-transit: #0b8fb0;
+  --og-s-ofd: #15935e;
+  --og-s-late: #d23b3b;
+  --og-tip-bg: rgba(255, 255, 255, 0.97);
+  --og-tip-border: #dfe2ea;
+  --og-tip-shadow: 0 4px 14px rgba(20, 24, 40, 0.12);
+}
+:root[data-theme="dark"] {
+  --og-bg: radial-gradient(ellipse 70% 90% at 30% 45%, #1a1440 0%, #0c1024 45%, #070b16 100%);
+  --og-border: #1c2440;
+  --og-panel: rgba(14, 20, 38, 0.72);
+  --og-overlay: rgba(10, 14, 28, 0.88);
+  --og-line: rgba(146, 164, 214, 0.16);
+  --og-text: #e8ecf5;
+  --og-muted: #8a95b3;
+  --og-faint: #56607c;
+  --og-amber: #ffb547;
+  --og-accent: #4caf50;
+  --og-ripple: #66bb6a;
+  --og-arc: linear-gradient(90deg, #ea580c, #fb923c, #facc15, #4ade80);
+  --og-track: rgba(146, 164, 214, 0.1);
+  --og-bar: linear-gradient(90deg, #1b5e20, #4caf50);
+  --og-ramp: linear-gradient(90deg, #123818, #2e7d32, #66bb6a, #c8f5c8);
+  --og-board: rgba(0, 0, 0, 0.35);
+  --og-board-line: rgba(146, 164, 214, 0.07);
+  --og-s-label: #9fb3ff;
+  --og-s-transit: #5ee6ff;
+  --og-s-ofd: #7cf2b5;
+  --og-s-late: #ff6b6b;
+  --og-tip-bg: rgba(10, 14, 28, 0.92);
+  --og-tip-border: rgba(146, 164, 214, 0.25);
+  --og-tip-shadow: none;
+}
+@media (max-width: 900px) {
+  .order-globe {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas: "globe" "side" "strip" !important;
+  }
+  .order-globe-globe { min-height: 360px !important; }
+  .order-globe-side { border-left: none !important; border-top: 1px solid var(--og-line); }
+}
+.globe-tip {
+  font: 12px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--og-text);
+  background: var(--og-tip-bg);
+  border: 1px solid var(--og-tip-border);
+  box-shadow: var(--og-tip-shadow);
+  border-radius: 6px;
+  padding: 6px 9px;
+}
+.globe-tip span { color: var(--og-muted); }
+.order-globe button:focus-visible { outline: 2px solid var(--og-accent); outline-offset: 2px; }
+@keyframes ogToastIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ogSpin { to { transform: rotate(360deg); } }
+.og-spinner {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 2px solid var(--og-line);
+  border-top-color: var(--og-accent);
+  animation: ogSpin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .og-spinner { animation: none; }
+}
+/* Globe city tags (NYC, LA…): bold black text, no chip. A faint white halo
+   keeps them legible where they sit over the red hexagons. Lifted slightly so
+   the text sits just above the city. */
+.og-city {
+  transform: translateY(-10px);
+  color: #000;
+  font: 800 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.9), 0 0 4px rgba(255, 255, 255, 0.6);
+  transition: opacity 0.2s;
+}
+/* Notable-place tags: a step quieter than the top cities; hover for the name. */
+.og-city-notable {
+  font-size: 9.5px;
+  font-weight: 700;
+  opacity: 0.85;
+  pointer-events: auto;
+  cursor: default;
+}

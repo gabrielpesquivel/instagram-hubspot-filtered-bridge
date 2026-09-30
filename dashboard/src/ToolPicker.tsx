@@ -1,5 +1,6 @@
 import { DigestCard } from "./DigestCard";
 import { SiteStatusCard } from "./SiteStatusCard";
+import { OrderGlobeCard } from "./OrderGlobeCard";
 import { FileCalendar } from "./FileCalendar";
 import { TodoList } from "./TodoList";
 import { NotesCard } from "./NotesCard";
@@ -10,8 +11,12 @@ import { NotesCard } from "./NotesCard";
 export function ToolPicker() {
   return (
     <div style={styles.container}>
-      {/* Hero: website health + reviews, full width across both columns */}
+      {/* Hero: order globe, then website health + reviews, full width across
+          both columns */}
       <div style={styles.hero}>
+        <h2 style={styles.heroTitle}>Orders View</h2>
+        <OrderGlobeCard />
+        <h2 style={styles.heroTitle}>Website Health Check</h2>
         <SiteStatusCard />
       </div>
 
@@ -77,6 +82,7 @@ const styles: Record<string, React.CSSProperties> = {
   left: { minWidth: 0, display: "grid", gridTemplateRows: "subgrid", gridRow: "span 3" },
   right: { minWidth: 0, display: "grid", gridTemplateRows: "subgrid", gridRow: "span 3" },
   colTitle: { margin: "0 0 0.25rem", fontSize: "1.25rem", color: "var(--text)" },
+  heroTitle: { margin: "0 0 0.6rem", fontSize: "1.25rem", color: "var(--text)" },
   colSub: { margin: 0, fontSize: "0.85rem", color: "var(--text-muted)" },
   notesRow: {
     maxWidth: "1100px",
