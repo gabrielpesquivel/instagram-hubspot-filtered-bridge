@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
-const csvPath = process.argv[2];
+const csvPath = process.argv[2]; // order CSV, or a custom-sheet spec .json
 const name = process.argv[3] || "Test";
 const outPdf = process.argv[4] || `/tmp/${name}_web.pdf`;
 
@@ -50,10 +50,16 @@ for p in ["reportlab","svglib","tinycss2","cssselect2","webencodings","lxml","Pi
 
   await pyodide.runPythonAsync("import sys; sys.path.insert(0,'/gangsheet'); import web_runner");
 
-  const csv = fs.readFileSync(csvPath);
-  pyodide.FS.writeFile("/tmp/in.csv", new Uint8Array(csv));
-
-  const collect = JSON.parse(pyodide.runPython(`web_runner.collect('/tmp/in.csv', ${JSON.stringify(name)})`));
+  let collect;
+  if (csvPath.endsWith(".json")) {
+    // Custom-sheet entries (the "+ Custom sheet" builder's spec)
+    pyodide.globals.set("_manual_spec", fs.readFileSync(csvPath, "utf8"));
+    collect = JSON.parse(pyodide.runPython(`web_runner.collect_manual(_manual_spec, ${JSON.stringify(name)})`));
+  } else {
+    const csv = fs.readFileSync(csvPath);
+    pyodide.FS.writeFile("/tmp/in.csv", new Uint8Array(csv));
+    collect = JSON.parse(pyodide.runPython(`web_runner.collect('/tmp/in.csv', ${JSON.stringify(name)})`));
+  }
   console.log("collect:", collect);
   if (collect.raster_svgs.length) {
     console.log("WARNING raster_svgs (would need canvas):", collect.raster_svgs);

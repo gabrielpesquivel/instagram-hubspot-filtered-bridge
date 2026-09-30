@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { CustomSheet, type Design } from "./CustomSheet";
 
 interface SheetJob {
   id: number;
@@ -316,7 +317,8 @@ const dateInputStyle: CSSProperties = {
 
 export function Gangsheet() {
   const workerRef = useRef<Worker | null>(null);
-  const queueRef = useRef<{ job: SheetJob; csv: ArrayBuffer }[]>([]);
+  // csv for order sheets, spec (custom-sheet entries JSON) for hand-built ones
+  const queueRef = useRef<{ job: SheetJob; csv?: ArrayBuffer; spec?: string }[]>([]);
   const busyRef = useRef(false);
   // Auto-generation (?autogen=<date>): the running auto job's name, and a
   // one-shot latch so the job is only enqueued once.
@@ -327,6 +329,16 @@ export function Gangsheet() {
   const [ready, setReady] = useState(false);
   const [jobs, setJobs] = useState<SheetJob[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
+  // Custom-sheet design picker: stocked flags/symbols + SVG preview blob URLs.
+  const [designs, setDesigns] = useState<Design[] | null>(null);
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const previewRequested = useRef(new Set<string>());
+
+  function requestPreview(path: string) {
+    if (previewRequested.current.has(path)) return;
+    previewRequested.current.add(path);
+    workerRef.current?.postMessage({ type: "asset", path });
+  }
 
   // Shopify order pull (replaces the manual Matrixify CSV export). `daily` is
   // the cron-stored 9am snapshot; the manual pull fetches an arbitrary range.
@@ -432,8 +444,8 @@ export function Gangsheet() {
     busyRef.current = true;
     updateJob(next.job.id, { status: "processing", detail: "Generating…" });
     workerRef.current?.postMessage(
-      { type: "generate", name: next.job.name, csv: next.csv },
-      [next.csv]
+      { type: "generate", name: next.job.name, csv: next.csv, spec: next.spec },
+      next.csv ? [next.csv] : []
     );
   }
 
@@ -452,6 +464,16 @@ export function Gangsheet() {
         case "ready":
           setReady(true);
           setRuntimeStatus("Ready");
+          if (!autoGenDate) worker.postMessage({ type: "catalog" });
+          break;
+        case "catalog":
+          setDesigns(msg.designs);
+          break;
+        case "asset":
+          if (msg.svg) {
+            const url = URL.createObjectURL(new Blob([msg.svg], { type: "image/svg+xml" }));
+            setPreviews((prev) => ({ ...prev, [msg.path]: url }));
+          }
           break;
         case "log":
           setLogs((prev) => [...prev.slice(-199), msg.text]);
@@ -613,6 +635,20 @@ export function Gangsheet() {
     const csv = new TextEncoder().encode(csvText).buffer as ArrayBuffer;
     setJobs((prev) => [...prev, job]);
     queueRef.current.push({ job, csv });
+    pumpQueue();
+  }
+
+  /** Queue a hand-built sheet from the "+ Custom sheet" builder. */
+  function enqueueCustom(name: string, spec: string, label: string) {
+    const job: SheetJob = {
+      id: nextJobId++,
+      name: name.replace(/[^A-Za-z0-9._-]/g, "_") || "custom",
+      fileName: label,
+      status: "queued",
+      detail: "Waiting…",
+    };
+    setJobs((prev) => [...prev, job]);
+    queueRef.current.push({ job, spec });
     pumpQueue();
   }
 
@@ -805,6 +841,13 @@ export function Gangsheet() {
                   </button>
                 </div>
               </div>
+              <CustomSheet
+                ready={ready}
+                designs={designs}
+                previews={previews}
+                requestPreview={requestPreview}
+                onGenerate={enqueueCustom}
+              />
             </div>
           </div>
 

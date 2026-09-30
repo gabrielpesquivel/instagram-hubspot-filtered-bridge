@@ -106,7 +106,21 @@ def collect(csv_path, name):
     that need rasterizing, and the list of customer-uploaded images that need
     downloading in the browser before render() is called."""
     df = pd.read_csv(csv_path, encoding='utf-8-sig')
-    items = gangsheet_main.collect_items_from_csv(df)
+    return _stage(gangsheet_main.collect_items_from_csv(df), name)
+
+
+def collect_manual(spec_json, name):
+    """Like collect(), for a hand-built sheet from the page's "+ Custom sheet"
+    builder: spec_json is the list of entries collect_items_from_manual takes."""
+    return _stage(gangsheet_main.collect_items_from_manual(json.loads(spec_json)), name)
+
+
+def catalog():
+    """Every stocked flag/symbol, for the custom-sheet design picker."""
+    return json.dumps(gangsheet_main.design_catalog())
+
+
+def _stage(items, name):
     _pending[name] = items
 
     # Gradient/clipPath SVGs are now embedded from build-time rsvg PDF sidecars

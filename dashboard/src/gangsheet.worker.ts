@@ -3,6 +3,9 @@
 // Protocol (main -> worker):
 //   { type: "init" }
 //   { type: "generate", name: string, csv: ArrayBuffer }
+//   { type: "generate", name: string, spec: string }   // custom sheet entries (JSON)
+//   { type: "catalog" }                                 // list stocked flags/symbols
+//   { type: "asset", path: string }                     // SVG text for a design preview
 //   { type: "raster-done", pngs: { path: string; png: ArrayBuffer }[] }
 //   { type: "images-done", images: { path: string; png: ArrayBuffer }[] }
 //
@@ -13,6 +16,8 @@
 //   { type: "need-raster", svgs: { path, svgText }[] }  // canvas rasterization request
 //   { type: "need-images", images: { path, url, remove_bg }[] }  // download custom artwork
 //   { type: "done", name, pdf, count, errors, widthMm, heightMm }
+//   { type: "catalog", designs: { path, name, group, kind }[] }
+//   { type: "asset", path, svg }
 //   { type: "error", name?, text }
 
 // 0.28.x ships lxml 6 (svglib 1.6 requires lxml>=6.0.0 and has no older wheel)
@@ -70,11 +75,20 @@ async function ensureInit() {
   await initPromise;
 }
 
-async function generate(name: string, csv: ArrayBuffer) {
-  pyodide.FS.writeFile("/tmp/upload.csv", new Uint8Array(csv));
-  const collect = JSON.parse(
-    pyodide.runPython(`web_runner.collect('/tmp/upload.csv', ${JSON.stringify(name)})`)
-  );
+async function generate(name: string, csv?: ArrayBuffer, spec?: string) {
+  let collect;
+  if (spec !== undefined) {
+    // Custom sheet: entries go straight to collect_items_from_manual.
+    pyodide.globals.set("_manual_spec", spec);
+    collect = JSON.parse(
+      pyodide.runPython(`web_runner.collect_manual(_manual_spec, ${JSON.stringify(name)})`)
+    );
+  } else {
+    pyodide.FS.writeFile("/tmp/upload.csv", new Uint8Array(csv!));
+    collect = JSON.parse(
+      pyodide.runPython(`web_runner.collect('/tmp/upload.csv', ${JSON.stringify(name)})`)
+    );
+  }
 
   if (collect.raster_svgs.length > 0) {
     // These SVGs use gradients/clipPaths; the desktop tool rasterizes them with
@@ -133,7 +147,19 @@ self.onmessage = async (e: MessageEvent) => {
       await ensureInit();
     } else if (msg.type === "generate") {
       await ensureInit();
-      await generate(msg.name, msg.csv);
+      await generate(msg.name, msg.csv, msg.spec);
+    } else if (msg.type === "catalog") {
+      await ensureInit();
+      post({ type: "catalog", designs: JSON.parse(pyodide.runPython("web_runner.catalog()")) });
+    } else if (msg.type === "asset") {
+      await ensureInit();
+      // Catalog paths are relative to the bundle's assets/ folder.
+      const path = `/gangsheet/assets/${String(msg.path).replace(/\.\.\//g, "")}`;
+      let svg = "";
+      try {
+        svg = new TextDecoder().decode(pyodide.FS.readFile(path));
+      } catch { /* missing -> empty preview */ }
+      post({ type: "asset", path: msg.path, svg });
     } else if (msg.type === "raster-done") {
       rasterResolve?.(msg.pngs);
       rasterResolve = null;
