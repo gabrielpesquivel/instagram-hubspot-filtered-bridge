@@ -14,6 +14,7 @@ const OAUTH_SCOPES = [
   "business_management",
   "instagram_basic",
   "instagram_manage_messages",
+  "ads_read", // Meta Ads page (handlers/meta-ads.ts)
 ].join(",");
 
 export interface MetaConnection {

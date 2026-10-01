@@ -110,6 +110,7 @@ import { handleGetShopReviews, handlePostShopReviews } from "./handlers/shop-rev
 import { handleGetNotes, handlePutNotes } from "./handlers/notes";
 import { handleGetRoster, handlePutRoster } from "./handlers/roster";
 import { handleSiteStatus, recordSitePing } from "./handlers/site-status";
+import { handleGetMetaAds, handleMetaAdsDebug, handleSetMetaAdsAccount } from "./handlers/meta-ads";
 import { handleGetOrderGlobe, handleOrderGlobeBackfill, handleOrderGlobeRefresh, syncOrderGlobe } from "./handlers/order-globe";
 import { autoDraftEmails } from "./handlers/email-autodraft";
 import {
@@ -474,6 +475,17 @@ export default {
     }
     if (path === "/api/stocktake/use" && request.method === "POST") {
       return handleStockUse(request, env);
+    }
+
+    // Meta Ads reporting (#/ads) — Marketing API insights + Shopify MER
+    if (path === "/api/meta-ads" && request.method === "GET") {
+      return handleGetMetaAds(request, env);
+    }
+    if (path === "/api/meta-ads/debug" && request.method === "GET") {
+      return handleMetaAdsDebug(request, env);
+    }
+    if (path === "/api/meta-ads/account" && request.method === "POST") {
+      return handleSetMetaAdsAccount(request, env);
     }
 
     // Shop (shop.app) review stats (home-page card; synced by a local

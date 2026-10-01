@@ -10,6 +10,7 @@ import { DmManager } from "./DmManager";
 import { Sentiment } from "./Sentiment";
 import { StockTake } from "./StockTake";
 import { Roster } from "./Roster";
+import { MetaAds } from "./MetaAds";
 import { SideNav, type NavTool } from "./SideNav";
 import { TopBar } from "./TopBar";
 
@@ -23,6 +24,7 @@ const TITLES: Record<NavTool, string> = {
   sentiment: "Customer Sentiment",
   stocktake: "Stock View",
   roster: "Roster",
+  ads: "Meta Ads Hub",
   bridge: "Dashboard",
 };
 
@@ -37,6 +39,7 @@ function toolFromHash(): NavTool {
   if (hash.startsWith("#/sentiment")) return "sentiment";
   if (hash.startsWith("#/stocktake")) return "stocktake";
   if (hash.startsWith("#/roster")) return "roster";
+  if (hash.startsWith("#/ads")) return "ads";
   return "picker";
 }
 
@@ -78,6 +81,7 @@ export function App() {
   else if (tool === "sentiment") page = <Sentiment />;
   else if (tool === "stocktake") page = <StockTake />;
   else if (tool === "roster") page = <Roster />;
+  else if (tool === "ads") page = <MetaAds />;
   else page = <ToolPicker />;
 
   return (

@@ -66,7 +66,8 @@ SELF_HOST = "bootink-internal-tools.soft-smoke-9baf.workers.dev"
 
 # Secrets (set via `wrangler secret put <NAME>`):
 # - META_APP_ID
-# - META_APP_SECRET
+# - META_APP_SECRET        (OAuth scopes incl. ads_read for the Meta Ads page — the Meta app
+#                          needs the Marketing API use case; reconnect once after adding)
 # - INSTAGRAM_APP_SECRET
 # - META_PAGE_ACCESS_TOKEN
 # - INSTAGRAM_PAGE_ID
