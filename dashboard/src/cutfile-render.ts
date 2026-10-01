@@ -10,7 +10,8 @@
 //   - Marks: solid black 5 mm discs, centred 5 mm outside the bounding box of
 //     the magenta cut boxes (left/right columns, top/bottom rows). When the
 //     mark-to-mark height exceeds MAX_SEGMENT_MM the sheet is split into equal
-//     segments with an extra pair of marks at each split.
+//     segments with an extra pair of marks at each split (the cutter misplaces
+//     a segment whose length differs from the first — see planMarks).
 //   - PLT: HPGL-ish, 40 units/mm. One "TB26,0,W,H;...PG;" block per segment,
 //     bottom segment first. Origin = that segment's bottom-right mark; +X runs
 //     up the sheet (feed, bottom comes out first), +Y runs right-to-left.
@@ -107,11 +108,16 @@ export function planMarks(rects: CutRect[]): MarkPlan {
   const n = Math.max(1, Math.ceil((bottom - top) / MAX_SEGMENT_MM - 1e-6));
   const ys = [bottom];
   for (let i = 1; i < n; i++) {
-    // Even split, snapped to a row boundary so no cell straddles two segments.
+    // Even split, snapped up to a row boundary so no cell straddles two
+    // segments and the bottom segment is never the shorter one.
     const target = bottom - ((bottom - top) * i) / n;
-    ys.push(minY + Math.round((target - minY) / GRID_MM) * GRID_MM);
+    ys.push(minY + Math.floor((target - minY) / GRID_MM + 1e-6) * GRID_MM);
   }
-  ys.push(top);
+  // Segments must all be the same length: 30888-31029 p2 (hand-stretched
+  // boxes, 260 mm + 255 mm segments) cut its top segment low while equal
+  // splits cut true. Pad the top segment upward into the 150 mm top margin.
+  const padded = n > 1 ? ys[n - 1] - (ys[0] - ys[1]) : top;
+  ys.push(padded >= MARK_DIAMETER_MM ? Math.min(top, padded) : top);
   return { left: minX - MARK_OFFSET_MM, right: maxX + MARK_OFFSET_MM, ys };
 }
 
