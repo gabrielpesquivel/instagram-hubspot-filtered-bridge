@@ -1,4 +1,4 @@
-import type { Env } from "../types";
+import type { Env, ConversationMessage } from "../types";
 import { isAuthenticated, jsonResponse } from "../utils/auth";
 import {
   getConversationIndex,
@@ -10,8 +10,10 @@ import {
   deleteMessage,
   clearAllConversations,
   setMessageStatus,
+  seedConversation,
 } from "../services/conversations";
 import { sendMessage } from "../services/instagram-api";
+import { getInstagramThreadMessages } from "../services/instagram-conversations";
 import {
   generateReply,
   getGeminiSettings,
@@ -67,7 +69,9 @@ export async function handleReplyConversation(
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
 
-  let body: { text?: string; aiSuggestion?: string };
+  // `conversationId` is sent for live-pulled threads (no stored conversation
+  // yet) so the first reply can seed history from the Graph thread.
+  let body: { text?: string; aiSuggestion?: string; conversationId?: string };
   try {
     body = await request.json();
   } catch {
@@ -80,15 +84,38 @@ export async function handleReplyConversation(
 
   const text = body.text.trim();
 
-  // Check if 24h window expired — use HUMAN_AGENT tag if so
   const conv0 = await getConversation(senderId, env);
-  const expired = conv0 ? isWindowExpired(conv0.messages) : false;
+  let history: ConversationMessage[] = conv0?.messages || [];
+  let username = conv0?.senderUsername || senderId;
+  // Pull thread replied to for the first time: store its Graph history (real
+  // timestamps) so the 24h window, username and AI context are right — before,
+  // the conv was created with the numeric id, no history and expired=false.
+  let seeded = false;
+  if (!conv0 && body.conversationId) {
+    const detail = await getInstagramThreadMessages(env, body.conversationId).catch(() => null);
+    if (detail && (!detail.senderId || detail.senderId === senderId)) {
+      history = detail.messages
+        .filter((m) => m.text.trim())
+        .map((m) => ({
+          id: crypto.randomUUID(),
+          sender: m.fromUs ? "agent" : "user",
+          text: m.text,
+          timestamp: m.date || new Date().toISOString(),
+        }));
+      username = detail.username || username;
+      await seedConversation(senderId, username, history, env);
+      seeded = true;
+    }
+  }
+
+  // Check if 24h window expired — use HUMAN_AGENT tag if so. A brand-new
+  // conversation we couldn't fetch history for keeps the old default (open).
+  const expired = conv0 || seeded ? isWindowExpired(history) : false;
 
   // Send via Instagram
   const sent = await sendMessage(senderId, text, env, { humanAgent: expired });
 
   // Store either way — failed sends stay visible with a retry button
-  const username = conv0?.senderUsername || senderId;
   await addMessageToConversation(
     senderId, username, text, "agent", env, undefined,
     sent ? "sent" : "failed"
@@ -113,7 +140,7 @@ export async function handleReplyConversation(
   // confirmed send, so we never learn from a reply that failed to deliver.
   let amendment = null;
   if (body.aiSuggestion) {
-    const lastCustomer = [...(conv0?.messages || [])].reverse().find((m) => m.sender === "user");
+    const lastCustomer = [...history].reverse().find((m) => m.sender === "user");
     amendment = await maybeProposeAmendment(env, lastCustomer?.text || "", body.aiSuggestion, text);
   }
 
@@ -184,7 +211,7 @@ export async function handleSuggestConversationReply(
     const suggestion = await generateReply(
       conv.messages, env,
       discount ? discountInstruction(discount) : undefined,
-      { collectActions: actions }
+      { collectActions: actions, channel: "instagram", shopify: {} }
     );
     return jsonResponse({ suggestion, actions });
   } catch (error) {
@@ -217,7 +244,7 @@ export async function handleGenerateAndSendReply(
   }
 
   try {
-    const suggestion = await generateReply(conv.messages, env);
+    const suggestion = await generateReply(conv.messages, env, undefined, { channel: "instagram" });
 
     // Send immediately via Instagram
     const sent = await sendMessage(senderId, suggestion, env);

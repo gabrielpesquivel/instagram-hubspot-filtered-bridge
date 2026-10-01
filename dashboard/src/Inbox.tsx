@@ -115,7 +115,8 @@ interface EmailSummary {
 // Flag emails that aren't real customer inquiries — payout notices, platform
 // notifications, marketing blasts — by sender address/domain and telltale
 // subject/snippet phrases. Purely a visual triage aid; false negatives are
-// harmless and false positives still show (just tinted orange).
+// harmless and false positives still show (just tinted orange). Mirrored in
+// src/services/gmail-api.ts (auto-draft cron skips these) — keep in sync.
 function isAutomatedEmail(from: string, subject: string, snippet: string): boolean {
   const addr = extractEmail(from);
   // Shopify relays the website contact form through its own domains, so those
@@ -239,10 +240,26 @@ export function Inbox() {
   const [labelEditing, setLabelEditing] = useState<string | null>(null);
   const [labelDraft, setLabelDraft] = useState("");
 
+  // A discount created while an Auto Draft is in flight waits here until it
+  // settles (previously it was silently dropped).
+  const [queuedDiscount, setQueuedDiscount] = useState<CreatedDiscount | null>(null);
+
   const endRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  // Request generations for async composer/order work. selectItem bumps them, so
+  // a draft/send/lookup that resolves after the agent switched threads can tell
+  // it's stale and not write into the newly opened thread.
+  const draftSeqRef = useRef(0);
+  const sendSeqRef = useRef(0);
+  const orderSeqRef = useRef(0);
+
+  // True while `sel` is still the open thread (checked after every await).
+  function isOpen(sel: Selected): boolean {
+    const cur = selectedRef.current;
+    return !!cur && cur.channel === sel.channel && cur.id === sel.id;
+  }
 
   // The reply box is a contentEditable div (so Shopify facts can render green).
   // It's uncontrolled — we write to its DOM only on programmatic changes (AI
@@ -479,6 +496,15 @@ export function Inbox() {
       conversationId: item.conversationId,
     };
     setSelected(sel);
+    // Update the ref now (not on next render) so in-flight work sees the switch.
+    selectedRef.current = sel;
+    draftSeqRef.current++;
+    sendSeqRef.current++;
+    orderSeqRef.current++;
+    setDrafting(false);
+    setSending(false);
+    setOrderLoading(false);
+    setQueuedDiscount(null);
     setIgMessages([]);
     setEmailMessages([]);
     setEditorContent("");
@@ -495,9 +521,13 @@ export function Inbox() {
   // Treat a query with an "@" as an email lookup, otherwise an order number.
   // Accepts an explicit query (Feature 2 auto-lookup passes the customer email
   // before the orderQuery state has committed); falls back to the input value.
+  // The newest lookup wins: an older one still in flight (e.g. the previous
+  // thread's auto-lookup) is ignored rather than blocking this one or landing
+  // its orders under the wrong thread.
   async function lookupOrders(queryArg?: string) {
     const q = (queryArg ?? orderQuery).trim();
-    if (!q || orderLoading) return;
+    if (!q) return;
+    const seq = ++orderSeqRef.current;
     setOrderLoading(true);
     setOrderError("");
     setOrderResults([]);
@@ -506,26 +536,30 @@ export function Inbox() {
         ? `/api/shopify/orders?email=${encodeURIComponent(q)}`
         : `/api/shopify/order?name=${encodeURIComponent(q)}`;
       const res = await fetch(url);
+      if (seq !== orderSeqRef.current) return;
       if (res.status === 404) {
         setOrderError("No order found.");
       } else if (!res.ok) {
         setOrderError("Lookup failed.");
       } else {
         const data = await res.json();
+        if (seq !== orderSeqRef.current) return;
         const orders: ShopifyOrder[] = data.orders || (data.order ? [data.order] : []);
         if (!orders.length) setOrderError("No orders found.");
         setOrderResults(orders);
       }
     } catch {
-      setOrderError("Network error.");
+      if (seq === orderSeqRef.current) setOrderError("Network error.");
     } finally {
-      setOrderLoading(false);
+      if (seq === orderSeqRef.current) setOrderLoading(false);
     }
   }
 
   // ── Composer actions ────────────────────────────────────────────────────
   async function handleAiDraft(discount?: CreatedDiscount) {
     if (!selected || drafting) return;
+    const sel = selected;
+    const seq = ++draftSeqRef.current;
     setDrafting(true);
     try {
       // IG has two suggest paths: stored conversations key off senderId; live
@@ -545,6 +579,8 @@ export function Inbox() {
           : {}),
       });
       const data = await res.json();
+      // Agent switched threads meanwhile — this draft belongs to the old one.
+      if (seq !== draftSeqRef.current || !isOpen(sel)) return;
       if (res.ok && data.suggestion) {
         const raw: string = data.suggestion;
         // Render green when the AI cited live order data (⟦…⟧), else plain.
@@ -555,28 +591,59 @@ export function Inbox() {
         toast(data.error || "Auto Draft failed");
       }
     } catch {
-      toast("Network error — AI draft failed");
+      if (seq === draftSeqRef.current) toast("Network error — AI draft failed");
     } finally {
-      setDrafting(false);
+      if (seq === draftSeqRef.current) setDrafting(false);
     }
   }
 
   // A discount created from the Discount modal → regenerate the draft for the
-  // open thread with the code woven in. Ref keeps the listener stable while
-  // still seeing the current selected thread / drafting state.
-  const aiDraftRef = useRef(handleAiDraft);
-  aiDraftRef.current = handleAiDraft;
-  useEffect(() => onDiscount((d) => { void aiDraftRef.current(d); }), []);
+  // open thread with the code woven in. Queued (not dropped) while a draft is
+  // in flight; the effect below runs it once drafting settles.
+  useEffect(
+    () => onDiscount((d) => { if (selectedRef.current) setQueuedDiscount(d); }),
+    []
+  );
+  useEffect(() => {
+    if (!queuedDiscount || drafting) return;
+    const d = queuedDiscount;
+    setQueuedDiscount(null);
+    applyDiscount(d);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queuedDiscount, drafting]);
+
+  // Empty composer or an untouched AI draft → re-draft with the code. If the
+  // agent has typed/edited their own reply, don't overwrite it — append the
+  // code at the end (keeping any green order facts) for them to place.
+  function applyDiscount(d: CreatedDiscount) {
+    const norm = (t: string) => t.replace(/\s+/g, " ").trim();
+    const typed = norm(draft);
+    if (!typed || (aiSuggestion != null && typed === norm(aiSuggestion))) {
+      void handleAiDraft(d);
+      return;
+    }
+    const el = editorRef.current;
+    if (!el) return;
+    el.appendChild(document.createTextNode(`\n\n${d.code}`));
+    setDraft(el.innerText);
+    toast(`${d.code} added to the end of your reply — your edits were kept`, "success");
+  }
 
   async function handleSend() {
     if (!selected || !draft.trim() || sending) return;
     const text = draft.trim();
+    // Pin the thread this send is for: if the agent switches threads before the
+    // response lands, thread-specific UI updates (bubbles, composer restore)
+    // must not hit the newly opened thread.
+    const sel = selected;
+    const seq = ++sendSeqRef.current;
+    const stillOpen = () => isOpen(sel);
     setSending(true);
 
     const learnFrom = aiSuggestion;
     setAiSuggestion(null);
 
-    if (selected.channel === "instagram") {
+    if (sel.channel === "instagram") {
       const optimistic: IgMessage = {
         id: "temp-" + Date.now(),
         sender: "agent",
@@ -586,20 +653,28 @@ export function Inbox() {
       setIgMessages((p) => [...p, optimistic]);
       setEditorContent("");
       try {
-        const res = await fetch(`/api/conversations/${encodeURIComponent(selected.id)}/reply`, {
+        const res = await fetch(`/api/conversations/${encodeURIComponent(sel.id)}/reply`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, aiSuggestion: learnFrom || undefined }),
+          // Pull threads pass their Graph conversation so the server can seed
+          // the new stored conversation's history / username / 24h window.
+          body: JSON.stringify({
+            text,
+            aiSuggestion: learnFrom || undefined,
+            conversationId: sel.source === "pull" ? sel.conversationId : undefined,
+          }),
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           if (body.failed) {
             toast("Send failed — saved with a retry button");
-            loadThread(selected, true);
-          } else {
+            if (stillOpen()) loadThread(sel, true);
+          } else if (stillOpen()) {
             setIgMessages((p) => p.filter((m) => m.id !== optimistic.id));
             setEditorContent(text);
             toast(body.error || "Send failed");
+          } else {
+            toast(`${body.error || "Send failed"} — message not sent`);
           }
         } else {
           const ok = await res.json().catch(() => ({}));
@@ -607,15 +682,17 @@ export function Inbox() {
           fetchIg();
         }
       } catch {
-        setIgMessages((p) => p.filter((m) => m.id !== optimistic.id));
-        setEditorContent(text);
+        if (stillOpen()) {
+          setIgMessages((p) => p.filter((m) => m.id !== optimistic.id));
+          setEditorContent(text);
+        }
         toast("Network error — message not sent");
       } finally {
-        setSending(false);
+        if (seq === sendSeqRef.current) setSending(false);
       }
     } else {
       try {
-        const res = await fetch(`/api/email/threads/${encodeURIComponent(selected.id)}/reply`, {
+        const res = await fetch(`/api/email/threads/${encodeURIComponent(sel.id)}/reply`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text, aiSuggestion: learnFrom || undefined }),
@@ -623,14 +700,16 @@ export function Inbox() {
         const body = await res.json().catch(() => ({}));
         if (res.ok) {
           toast("Email sent", "success");
-          setEditorContent("");
-          setEmailMessages((p) => [
-            ...p,
-            { fromUs: true, fromName: "You", text, date: new Date().toISOString() },
-          ]);
+          if (stillOpen()) {
+            setEditorContent("");
+            setEmailMessages((p) => [
+              ...p,
+              { fromUs: true, fromName: "You", text, date: new Date().toISOString() },
+            ]);
+          }
           // Sent threads drop out of the unread queue (and stay out even if a
           // poll races Gmail's read-state update).
-          dismissThread(selected.id);
+          dismissThread(sel.id);
           if (body.amendment) showAmendment(body.amendment);
         } else {
           toast(body.error || "Email send failed");
@@ -638,7 +717,7 @@ export function Inbox() {
       } catch {
         toast("Network error — email not sent");
       } finally {
-        setSending(false);
+        if (seq === sendSeqRef.current) setSending(false);
       }
     }
   }
@@ -667,13 +746,33 @@ export function Inbox() {
 
   async function handleToggleAuto() {
     if (!selected || selected.channel !== "instagram") return;
+    const sel = selected;
     const next = !autoReply;
     setAutoReply(next);
-    await fetch(`/api/conversations/${encodeURIComponent(selected.id)}/auto-reply`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: next }),
-    });
+    // Optimistic — revert if the server refuses (e.g. a pull thread with no
+    // stored conversation 404s, which used to leave the button showing ON).
+    let ok = false;
+    let error = "";
+    try {
+      const res = await fetch(`/api/conversations/${encodeURIComponent(sel.id)}/auto-reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      ok = res.ok;
+      if (!ok) {
+        error = res.status === 404
+          ? "AI auto needs a saved conversation — reply once first"
+          : ((await res.json().catch(() => ({}))).error || "Failed to change AI auto");
+      }
+    } catch {
+      error = "Network error — AI auto not changed";
+    }
+    if (!ok) {
+      if (isOpen(sel)) setAutoReply(!next);
+      toast(error);
+      return;
+    }
     fetchIg();
   }
 
@@ -681,32 +780,56 @@ export function Inbox() {
     if (!selected) return;
     if (selected.channel === "instagram") {
       const senderId = selected.id;
-      // Mark done so the live pull hides it until the customer messages again…
-      fetch("/api/instagram/done", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ senderId }),
-      }).catch(() => {});
-      // …and archive the stored conversation (no-op if a pull thread was never
-      // replied to, so it never created one).
-      fetch(`/api/conversations/${encodeURIComponent(senderId)}/archive`, { method: "POST" }).catch(() => {});
+      // Hide optimistically; if either call fails, re-fetch so it comes back.
       setIgUnread((p) => p.filter((u) => u.senderId !== senderId));
       setIgConvos((p) => p.filter((c) => c.senderId !== senderId));
+      Promise.all([
+        // Mark done so the live pull hides it until the customer messages again…
+        fetch("/api/instagram/done", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ senderId }),
+        }).then((r) => r.ok),
+        // …and archive the stored conversation (404 = a pull thread that was
+        // never replied to, so it has none — that's fine).
+        fetch(`/api/conversations/${encodeURIComponent(senderId)}/archive`, { method: "POST" })
+          .then((r) => r.ok || r.status === 404),
+      ])
+        .catch(() => [false])
+        .then((results) => {
+          if (results.every(Boolean)) return;
+          toast("Couldn't mark the conversation done — it's back in the list");
+          fetchIg();
+          fetchIgUnread();
+        });
     } else {
       // Email: mark the Gmail thread read so it leaves the unread queue for good
       // (without this it dropped locally but came back on the next poll/refresh).
-      const threadId = selected.id;
-      fetch(`/api/email/threads/${encodeURIComponent(threadId)}/done`, { method: "POST" }).catch(() => {});
-      dismissThread(threadId);
+      markEmailDone(selected.id);
     }
     setSelected(null);
+  }
+
+  // Mark a Gmail thread read and drop it from the list optimistically; on
+  // failure un-dismiss and re-fetch so it reappears instead of silently
+  // vanishing until the next poll.
+  function markEmailDone(threadId: string) {
+    dismissThread(threadId);
+    fetch(`/api/email/threads/${encodeURIComponent(threadId)}/done`, { method: "POST" })
+      .then((r) => r.ok)
+      .catch(() => false)
+      .then((ok) => {
+        if (ok) return;
+        dismissedRef.current.delete(threadId);
+        toast("Couldn't mark the email done — it's back in the list");
+        fetchEmail();
+      });
   }
 
   // One-click removal for automated/non-support emails (orange cards) straight
   // from the list — marks the Gmail thread read without opening it.
   function quickRemove(threadId: string) {
-    fetch(`/api/email/threads/${encodeURIComponent(threadId)}/done`, { method: "POST" }).catch(() => {});
-    dismissThread(threadId);
+    markEmailDone(threadId);
     if (selected?.channel === "email" && selected.id === threadId) setSelected(null);
   }
 
@@ -740,11 +863,16 @@ export function Inbox() {
     if (busyPending) return;
     setBusyPending(id);
     try {
-      await fetch(`/api/pending/${action}`, {
+      const res = await fetch(`/api/pending/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast(body.error || "Action failed");
+        return;
+      }
       setPending((p) => p.filter((x) => x.id !== id));
       if (action === "approve") fetchIg();
     } catch {
@@ -802,9 +930,11 @@ export function Inbox() {
     });
   }
 
-  // Only surface conversations active in the last 48 hours.
+  // Only surface Instagram conversations active in the last 48 hours. Email is
+  // already an unread-only queue — age-filtering it hid e.g. Friday's unread
+  // emails on Monday (and dropped them from the pill count).
   const cutoff = Date.now() - 48 * 60 * 60 * 1000;
-  const recent = items.filter((i) => i.at >= cutoff);
+  const recent = items.filter((i) => i.channel === "email" || i.at >= cutoff);
 
   const q = search.trim().toLowerCase();
   const visible = recent
@@ -1204,7 +1334,14 @@ export function Inbox() {
               <div style={styles.composerBtns}>
                 {/* Manual order actions — always here even when the AI popup
                     doesn't fire for a request. */}
-                <ManualActions />
+                <ManualActions
+                  orderNumber={
+                    orderResults.length === 1
+                      ? orderResults[0].name
+                      : orderQuery.includes("@") ? "" : orderQuery
+                  }
+                  customerName={orderResults[0]?.customerName}
+                />
                 <button
                   onClick={() => handleAiDraft()}
                   disabled={drafting || composerDisabled}
@@ -1448,10 +1585,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "0.72rem", fontWeight: 700, color: "var(--text-muted)", cursor: "pointer",
   },
   autoBtnOn: { background: "#5e35b1", color: "#fff", borderColor: "#5e35b1" },
-  archiveBtn: {
-    padding: "0.3rem 0.8rem", background: "var(--surface)", border: `1px solid ${BORDER}`, borderRadius: "7px",
-    fontSize: "0.72rem", fontWeight: 600, color: "var(--text-muted)", cursor: "pointer",
-  },
   doneBtn: {
     padding: "0.3rem 0.85rem", background: "#16a34a", border: "1px solid #16a34a", borderRadius: "7px",
     fontSize: "0.72rem", fontWeight: 700, color: "#fff", cursor: "pointer",

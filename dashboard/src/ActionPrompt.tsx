@@ -56,7 +56,8 @@ export function ActionPrompt() {
 
 /** Always-available fallback for all five order actions: compact buttons that
  *  open the identical modals with a blank proposal, for when the AI misses a
- *  request (or there is no conversation at all). Order number is typed in.
+ *  request (or there is no conversation at all). The open thread's looked-up
+ *  order / customer prefill the form when known; otherwise it's typed in.
  *  Lives in the composer row, left of Auto Draft. */
 const MANUAL_ACTIONS: { type: string; label: string; summary: string }[] = [
   { type: "update_address", label: "Address", summary: "Change order address" },
@@ -67,8 +68,19 @@ const MANUAL_ACTIONS: { type: string; label: string; summary: string }[] = [
   { type: "create_discount", label: "Discount", summary: "Create one-time discount code" },
 ];
 
-export function ManualActions() {
+export function ManualActions({ orderNumber, customerName }: { orderNumber?: string; customerName?: string } = {}) {
   const [active, setActive] = useState<ActionProposal | null>(null);
+
+  function open(a: (typeof MANUAL_ACTIONS)[number]) {
+    const [first = "", ...rest] = (customerName || "").trim().split(/\s+/);
+    setActive({
+      id: crypto.randomUUID(),
+      type: a.type,
+      summary: a.summary,
+      orderNumber: cleanOrder(orderNumber || "") || undefined,
+      args: a.type === "create_discount" ? { first_name: first, last_name: rest.join(" ") } : {},
+    });
+  }
 
   return (
     <>
@@ -77,7 +89,7 @@ export function ManualActions() {
           key={a.type}
           style={styles.manualBtn}
           title={a.summary}
-          onClick={() => setActive({ id: crypto.randomUUID(), type: a.type, summary: a.summary, args: {} })}
+          onClick={() => open(a)}
         >
           {a.label}
         </button>
@@ -244,6 +256,8 @@ function AddressForm({ proposal, onDone }: FormProps) {
       const { ok, data } = await postAction("update-address", { orderNumber: order, address: addr });
       if (ok) { toast(`✓ #${cleanOrder(order)} address updated${starshipitNote(data)}`, "success"); onDone(); }
       else toast(String(data.error || "Update failed"));
+    } catch {
+      toast("Network error — nothing was changed, try again");
     } finally { setBusy(false); }
   }
 
@@ -307,6 +321,8 @@ function EmailForm({ proposal, onDone }: FormProps) {
       const { ok, data } = await postAction("update-email", { orderNumber: order, email });
       if (ok) { toast(`✓ #${cleanOrder(order)} email updated${starshipitNote(data)}`, "success"); onDone(); }
       else toast(String(data.error || "Update failed"));
+    } catch {
+      toast("Network error — nothing was changed, try again");
     } finally { setBusy(false); }
   }
   return (
@@ -338,10 +354,12 @@ function CancelRefundForm({ proposal, onDone }: FormProps) {
 
   // Item selection for partial refunds (Shopify-admin style).
   const [items, setItems] = useState<RefundLI[] | null>(null);
+  const [itemsLoading, setItemsLoading] = useState(false);
   const [loadErr, setLoadErr] = useState("");
   const [sel, setSel] = useState<Record<number, boolean>>({});
   const [qty, setQty] = useState<Record<number, number>>({});
   const [refundShipping, setRefundShipping] = useState(false);
+  const loadSeq = useRef(0);
   const [override, setOverride] = useState("");
 
   // Live amount preview from Shopify's suggestedRefund.
@@ -350,17 +368,38 @@ function CancelRefundForm({ proposal, onDone }: FormProps) {
   const [previewing, setPreviewing] = useState(false);
   const previewSeq = useRef(0);
 
+  // Line items belong to one order — drop them (and any in-flight load) when
+  // the order number changes, so a partial refund can't submit the previous
+  // order's line items against the new number.
+  function clearItems() {
+    loadSeq.current++;
+    setItems(null); setItemsLoading(false); setLoadErr(""); setSel({}); setQty({}); setPreview(null);
+  }
+  function changeOrder(v: string) {
+    if (v !== order) clearItems();
+    setOrder(v);
+  }
+
   async function load() {
     if (!order) return;
-    setLoadErr(""); setItems(null); setSel({}); setQty({}); setPreview(null);
-    const res = await fetch(`/api/shopify/actions/order-items?name=${encodeURIComponent(order)}`);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) { setLoadErr(String(data.error || "Lookup failed")); return; }
-    const lis: RefundLI[] = data.lineItems || [];
-    setItems(lis);
-    const q: Record<number, number> = {};
-    lis.forEach((li, i) => { q[i] = li.currentQuantity ?? li.quantity; });
-    setQty(q);
+    clearItems();
+    const seq = loadSeq.current;
+    setItemsLoading(true);
+    try {
+      const res = await fetch(`/api/shopify/actions/order-items?name=${encodeURIComponent(order)}`);
+      const data = await res.json().catch(() => ({}));
+      if (seq !== loadSeq.current) return;
+      if (!res.ok) { setLoadErr(String(data.error || "Lookup failed")); return; }
+      const lis: RefundLI[] = data.lineItems || [];
+      setItems(lis);
+      const q: Record<number, number> = {};
+      lis.forEach((li, i) => { q[i] = li.currentQuantity ?? li.quantity; });
+      setQty(q);
+    } catch {
+      if (seq === loadSeq.current) setLoadErr("Network error — couldn't load the order");
+    } finally {
+      if (seq === loadSeq.current) setItemsLoading(false);
+    }
   }
   useEffect(() => { if (order) load(); /* eslint-disable-next-line */ }, []);
 
@@ -416,6 +455,8 @@ function CancelRefundForm({ proposal, onDone }: FormProps) {
         const msg = mode === "cancel" ? `cancelled + refunded${starshipitNote(data)}` : `refunded ${data.amount} ${data.currency}`;
         toast(`✓ #${cleanOrder(order)} ${msg}`, "success"); onDone();
       } else toast(String(data.error || "Action failed"));
+    } catch {
+      toast("Network error — nothing was changed, try again");
     } finally { setBusy(false); }
   }
 
@@ -423,8 +464,8 @@ function CancelRefundForm({ proposal, onDone }: FormProps) {
     <div style={styles.body}>
       {arg(proposal, "reason") && <div style={styles.quote}>Reason: “{arg(proposal, "reason")}”</div>}
       <div style={styles.row2}>
-        <OrderField value={order} onChange={setOrder} />
-        <button style={styles.loadBtn} onClick={load}>Load items</button>
+        <OrderField value={order} onChange={changeOrder} />
+        <button style={styles.loadBtn} disabled={itemsLoading} onClick={load}>Load items</button>
       </div>
       <div style={styles.seg}>
         <button style={mode === "cancel" ? styles.segOn : styles.segOff} onClick={() => setMode("cancel")}>Cancel + full refund</button>
@@ -434,7 +475,12 @@ function CancelRefundForm({ proposal, onDone }: FormProps) {
       {mode === "refund" && (
         <>
           {loadErr && <div style={styles.err}>{loadErr}</div>}
-          {!items && !loadErr && <div style={styles.hint}>Loading order items…</div>}
+          {itemsLoading && <div style={styles.hint}>Loading order items…</div>}
+          {!items && !itemsLoading && !loadErr && (
+            <div style={styles.hint}>
+              {order ? "Click “Load items” to pick what to refund." : "Enter the order number, then click “Load items”."}
+            </div>
+          )}
           {items && items.length === 0 && <div style={styles.hint}>No line items found.</div>}
           {items && items.map((li, i) => {
             const maxQ = li.currentQuantity ?? li.quantity;
@@ -497,12 +543,27 @@ function DuplicateForm({ proposal, onDone }: FormProps) {
   const [qty, setQty] = useState<Record<number, number>>({});
   const [loadErr, setLoadErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const loadSeq = useRef(0);
+
+  // As in CancelRefundForm: items are tied to the order they were loaded for.
+  function changeOrder(v: string) {
+    if (v !== order) { loadSeq.current++; setItems(null); setLoadErr(""); }
+    setOrder(v);
+  }
 
   async function load() {
     if (!order) return;
+    const seq = ++loadSeq.current;
     setLoadErr(""); setItems(null);
-    const res = await fetch(`/api/shopify/actions/order-items?name=${encodeURIComponent(order)}`);
+    let res: Response;
+    try {
+      res = await fetch(`/api/shopify/actions/order-items?name=${encodeURIComponent(order)}`);
+    } catch {
+      if (seq === loadSeq.current) setLoadErr("Network error — couldn't load the order");
+      return;
+    }
     const data = await res.json().catch(() => ({}));
+    if (seq !== loadSeq.current) return;
     if (!res.ok) { setLoadErr(String(data.error || "Lookup failed")); return; }
     const lis: LI[] = data.lineItems || [];
     setItems(lis);
@@ -528,13 +589,15 @@ function DuplicateForm({ proposal, onDone }: FormProps) {
       const { ok, data } = await postAction("duplicate-order", { orderNumber: order, items: chosen });
       if (ok) { toast(`✓ $0 replacement ${data.replacementOrder} created for #${cleanOrder(order)}`, "success"); onDone(); }
       else toast(String(data.error || "Failed to create replacement"));
+    } catch {
+      toast("Network error — nothing was changed, try again");
     } finally { setBusy(false); }
   }
   return (
     <div style={styles.body}>
       {arg(proposal, "items") && <div style={styles.quote}>Customer mentioned: “{arg(proposal, "items")}”</div>}
       <div style={styles.row2}>
-        <OrderField value={order} onChange={setOrder} />
+        <OrderField value={order} onChange={changeOrder} />
         <button style={styles.loadBtn} onClick={load}>Load items</button>
       </div>
       {loadErr && <div style={styles.err}>{loadErr}</div>}
@@ -598,6 +661,8 @@ function AddToOrderForm({ proposal, onDone }: FormProps) {
       });
       if (ok) { toast(`✓ Items added to #${cleanOrder(order)}${notify ? " · invoice sent" : ""}`, "success"); onDone(); }
       else toast(String(data.error || "Failed to add items"));
+    } catch {
+      toast("Network error — nothing was changed, try again");
     } finally { setBusy(false); }
   }
   return (
@@ -669,6 +734,8 @@ function DiscountForm({ proposal, onDone }: FormProps) {
         announceDiscount({ code: created, amount });
         onDone();
       } else toast(String(data.error || "Failed to create discount"));
+    } catch {
+      toast("Network error — nothing was changed, try again");
     } finally { setBusy(false); }
   }
 

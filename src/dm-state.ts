@@ -204,6 +204,30 @@ export class DMState extends DurableObject<Env> {
     return conv;
   }
 
+  /** Create a conversation pre-filled with history that already happened (with
+   *  its real timestamps) — used when the agent first replies to a live-pulled
+   *  IG thread, so the 24h window and AI context see the customer's messages.
+   *  No-op if the conversation already exists. The index entry is created by
+   *  the addMessage call that follows. */
+  async seedConversation(
+    senderId: string,
+    senderUsername: string,
+    messages: ConversationMessage[]
+  ): Promise<void> {
+    await this.ensureMigrated();
+    if (await this.ctx.storage.get(`conv:${senderId}`)) return;
+    const now = new Date().toISOString();
+    const conv: Conversation = {
+      senderId,
+      senderUsername,
+      messages: messages.slice(-MAX_MESSAGES_PER_CONVERSATION),
+      autoReply: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.ctx.storage.put(`conv:${senderId}`, conv);
+  }
+
   async addMessage(
     senderId: string,
     senderUsername: string,

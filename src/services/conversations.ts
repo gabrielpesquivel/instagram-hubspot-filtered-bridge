@@ -31,6 +31,15 @@ export async function addMessageToConversation(
   return getDMState(env).addMessage(senderId, senderUsername, text, sender, translation, status);
 }
 
+export async function seedConversation(
+  senderId: string,
+  senderUsername: string,
+  messages: ConversationMessage[],
+  env: Env
+): Promise<void> {
+  return getDMState(env).seedConversation(senderId, senderUsername, messages);
+}
+
 export async function setMessageStatus(
   senderId: string,
   messageId: string,

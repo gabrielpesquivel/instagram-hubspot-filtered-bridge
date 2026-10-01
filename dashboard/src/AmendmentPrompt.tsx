@@ -27,17 +27,25 @@ export function AmendmentPrompt() {
     if (busy || !item) return;
     setBusy(true);
     try {
-      await fetch("/api/ai/amendments/action", {
+      const res = await fetch("/api/ai/amendments/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: item.id, action, rule: rule.trim() }),
       });
+      // Keep the card open on a failed approve so the (possibly edited) rule
+      // isn't lost; a failed dismiss just closes.
+      if (!res.ok && action === "approve") {
+        const body = await res.json().catch(() => ({}));
+        toast(body.error || "Failed to save guideline");
+        return;
+      }
       if (action === "approve") toast("Guideline added", "success");
+      setItem(null);
     } catch {
       toast("Failed to save guideline");
+      if (action === "reject") setItem(null);
     } finally {
       setBusy(false);
-      setItem(null);
     }
   }
 

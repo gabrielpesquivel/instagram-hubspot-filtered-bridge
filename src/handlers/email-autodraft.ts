@@ -1,7 +1,7 @@
 import type { Env } from "../types";
 import { clog, cerr } from "../services/logger";
 import { getGoogleConnection, getValidGoogleToken } from "../services/google-oauth";
-import { listUnreadThreads } from "../services/gmail-api";
+import { listUnreadThreads, isAutomatedEmail } from "../services/gmail-api";
 import { buildEmailSuggestion } from "./email";
 import type { ActionProposal } from "../services/gemini-api";
 
@@ -38,8 +38,8 @@ export async function clearStoredDraft(env: Env, threadId: string): Promise<void
   await env.PROFILE_CACHE.delete(draftKey(threadId));
 }
 
-/** Cron sweep: draft replies for unread threads that have none yet, and
- *  re-draft when the thread has new messages (its list `date` moved). */
+/** Cron sweep: draft replies for unread customer threads that have none yet,
+ *  and re-draft when the thread has new messages (its list `date` moved). */
 export async function autoDraftEmails(env: Env): Promise<void> {
   if (!env.GEMINI_API_KEY) return;
   const conn = await getGoogleConnection(env);
@@ -51,6 +51,9 @@ export async function autoDraftEmails(env: Env): Promise<void> {
     let drafted = 0;
     for (const t of threads) {
       if (drafted >= MAX_PER_RUN) break;
+      // Payout notices / no-reply / marketing aren't customers — don't spend
+      // Gemini drafting replies nobody will send.
+      if (isAutomatedEmail(t.from, t.subject, t.snippet)) continue;
       const raw = await env.PROFILE_CACHE.get(draftKey(t.threadId));
       if (raw) {
         try {

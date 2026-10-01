@@ -7,9 +7,9 @@ interface AgentSettingsData {
 }
 
 const GEMINI_MODELS = [
+  "gemini-3.8-flash",
+  "gemini-3.5-flash-lite",
   "gemini-2.5-flash",
-  "gemini-2.5-pro",
-  "gemini-2.5-flash-lite",
 ];
 
 export function AgentSettings({
@@ -19,7 +19,7 @@ export function AgentSettings({
   settings: AgentSettingsData | null;
   onUpdate: () => void;
 }) {
-  const [model, setModel] = useState("gemini-2.5-flash");
+  const [model, setModel] = useState("gemini-3.8-flash");
   const [autoApprove, setAutoApprove] = useState(false);
   const [saving, setSaving] = useState(false);
 

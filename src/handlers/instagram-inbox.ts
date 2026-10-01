@@ -134,7 +134,7 @@ export async function handleSuggestInstagramThreadReply(
     const suggestion = await generateReply(
       messages, env,
       discount ? discountInstruction(discount) : undefined,
-      { collectActions: actions }
+      { collectActions: actions, channel: "instagram", shopify: {} }
     );
     return jsonResponse({ suggestion, actions });
   } catch (error) {

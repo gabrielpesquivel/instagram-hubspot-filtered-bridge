@@ -41,24 +41,24 @@ export async function handleGoogleCallback(request: Request, env: Env): Promise<
   const errorParam = url.searchParams.get("error");
 
   if (errorParam) {
-    return htmlResponse("Authorization Failed", `<p>Google denied the request: ${escapeHtml(errorParam)}</p><p><a href="/#/email">Back</a></p>`, 400);
+    return htmlResponse("Authorization Failed", `<p>Google denied the request: ${escapeHtml(errorParam)}</p><p><a href="/#/support">Back</a></p>`, 400);
   }
   if (!code || !state) {
-    return htmlResponse("Authorization Failed", `<p>Missing code or state.</p><p><a href="/#/email">Back</a></p>`, 400);
+    return htmlResponse("Authorization Failed", `<p>Missing code or state.</p><p><a href="/#/support">Back</a></p>`, 400);
   }
   if (!(await validateGoogleState(state, env))) {
-    return htmlResponse("Authorization Failed", `<p>Invalid or expired state token. Please try again.</p><p><a href="/#/email">Back</a></p>`, 400);
+    return htmlResponse("Authorization Failed", `<p>Invalid or expired state token. Please try again.</p><p><a href="/#/support">Back</a></p>`, 400);
   }
 
   const redirectUri = `${url.origin}/auth/google/callback`;
   const tokens = await exchangeGoogleCode(code, redirectUri, env);
   if (!tokens?.access_token) {
-    return htmlResponse("Authorization Failed", `<p>Failed to exchange the authorization code.</p><p><a href="/#/email">Try Again</a></p>`, 500);
+    return htmlResponse("Authorization Failed", `<p>Failed to exchange the authorization code.</p><p><a href="/#/support">Try Again</a></p>`, 500);
   }
 
   const email = await fetchGmailAddress(tokens.access_token);
   if (!email) {
-    return htmlResponse("Authorization Failed", `<p>Connected, but could not read the mailbox address.</p><p><a href="/#/email">Try Again</a></p>`, 500);
+    return htmlResponse("Authorization Failed", `<p>Connected, but could not read the mailbox address.</p><p><a href="/#/support">Try Again</a></p>`, 500);
   }
 
   // Preserve an existing refresh token if Google didn't return a new one.
@@ -68,7 +68,7 @@ export async function handleGoogleCallback(request: Request, env: Env): Promise<
     refreshToken = existing?.refresh_token;
   }
   if (!refreshToken) {
-    return htmlResponse("Authorization Failed", `<p>No refresh token returned. Remove this app's access at myaccount.google.com/permissions, then reconnect.</p><p><a href="/#/email">Try Again</a></p>`, 500);
+    return htmlResponse("Authorization Failed", `<p>No refresh token returned. Remove this app's access at myaccount.google.com/permissions, then reconnect.</p><p><a href="/#/support">Try Again</a></p>`, 500);
   }
 
   await storeGoogleConnection(
@@ -82,7 +82,7 @@ export async function handleGoogleCallback(request: Request, env: Env): Promise<
     env
   );
 
-  return new Response(null, { status: 302, headers: { Location: "/#/email" } });
+  return new Response(null, { status: 302, headers: { Location: "/#/support" } });
 }
 
 export async function handleGetEmailConnection(request: Request, env: Env): Promise<Response> {
@@ -174,18 +174,6 @@ export async function buildEmailSuggestion(
     const customerName =
       formNameFrom(firstCustomer?.text || "") || firstNameFrom(firstCustomer?.from || "");
 
-    const emailInstruction = `This message is a customer-support EMAIL, not an Instagram DM. For this reply ONLY, override the brevity and pure-greeting rules above. Format the response EXACTLY like this, including the blank lines:
-
-Hi, ${customerName}.
-
-<your reply body here — clear sentences, with a line break between distinct points so it reads well>
-
-Kind regards,
-
-Still reply in the customer's language. Do not add a name or signature after "Kind regards,". Do not include a subject line or any text outside this format.
-
-WEBSITE REFERENCE (email only): When pointing the customer to our website, say "our website at bootink.com". Do NOT say "in our bio" or "found in our bio" — that phrasing is for Instagram DMs, not email.`;
-
     // Give the AI the customer's email so it can pull their live Shopify orders
     // (Feature 3) instead of deflecting order questions to info@bootink.com.
     // Website contact-form emails arrive From the store/form sender with the real
@@ -201,9 +189,12 @@ WEBSITE REFERENCE (email only): When pointing the customer to our website, say "
     const customerText = detail.messages.filter((m) => !m.fromUs).map((m) => m.text).join("\n");
     const orderNumber = orderNumberFrom(customerText);
     const actions: ActionProposal[] = [];
-    const suggestion = await generateReply(messages, env, [emailInstruction, extraInstruction].filter(Boolean).join("\n\n"), {
+    const suggestion = await generateReply(messages, env, extraInstruction, {
       shopify: { customerEmail, orderNumber: orderNumber || undefined },
       collectActions: actions,
+      channel: "email",
+      // firstNameFrom falls back to "there" for bare addresses — no real name.
+      customerName: customerName && customerName !== "there" ? customerName : undefined,
     });
     return { suggestion, subject: detail.subject, actions };
   }
@@ -311,8 +302,12 @@ export async function handleGetEmailThread(
     if (!detail) return jsonResponse({ error: "Thread not found" }, 404);
     const labels = await getImageLabels(env, threadId);
     // Include the cron-generated draft (if any) so the composer can prefill
-    // without a round-trip to Gemini.
-    const autoDraft = await getStoredDraft(env, threadId);
+    // without a round-trip to Gemini. The cron keys it to the Date header of
+    // the newest customer message — if the customer has written since (and the
+    // sweep hasn't re-drafted yet), the draft answers an older message: skip it.
+    const stored = await getStoredDraft(env, threadId);
+    const lastCustomer = [...detail.messages].reverse().find((m) => !m.fromUs);
+    const autoDraft = stored && lastCustomer && stored.threadDate === lastCustomer.date ? stored : null;
     return jsonResponse({
       threadId,
       subject: detail.subject,
@@ -320,7 +315,7 @@ export async function handleGetEmailThread(
       ...(autoDraft ? { autoDraft: { suggestion: autoDraft.suggestion, actions: autoDraft.actions, draftedAt: autoDraft.draftedAt } } : {}),
       messages: detail.messages.map((m) => ({
         fromUs: m.fromUs,
-        fromName: firstNameFrom(m.from),
+        fromName: displayNameFrom(m.from),
         text: m.text,
         date: m.date,
         images: m.images.map((img) => ({ ...img, label: labels[`${img.messageId}:${img.id}`] || "" })),
@@ -490,6 +485,13 @@ function firstNameFrom(from: string): string {
   const name = (m ? m[1] : from).trim();
   if (!name || name.includes("@")) return "there";
   return name.split(/\s+/)[0];
+}
+
+// Sender label for the thread view: first name when the From header has one,
+// otherwise the bare address (firstNameFrom's "there" is a greeting, not a label).
+function displayNameFrom(from: string): string {
+  const name = firstNameFrom(from);
+  return name === "there" ? emailFromHeader(from) || from.trim() || "Customer" : name;
 }
 
 function escapeHtml(str: string): string {

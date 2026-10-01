@@ -3,6 +3,26 @@ import { MetaConnection } from "./MetaConnection";
 import { WebhookSubscriptions } from "./WebhookSubscriptions";
 import { FilterSettings } from "./FilterSettings";
 import { AgentSettings } from "./AgentSettings";
+import { toast } from "./toast";
+
+// POST JSON and report whether it worked; toasts the server error (or a
+// network error) on failure so saves never fail silently.
+async function postOk(url: string, body?: unknown, failMsg = "Save failed"): Promise<boolean> {
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      ...(body !== undefined
+        ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+        : {}),
+    });
+    if (res.ok) return true;
+    const data = await res.json().catch(() => ({}));
+    toast(data.error || failMsg);
+  } catch {
+    toast(`Network error — ${failMsg.toLowerCase()}`);
+  }
+  return false;
+}
 
 interface BlocklistEntry {
   senderId: string;
@@ -81,11 +101,8 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
     } else {
       setLearnedAmend([]);
     }
-    await fetch("/api/ai/amendments/action", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, action }),
-    });
+    // Re-fetch either way: on failure it restores the optimistic removal.
+    await postOk("/api/ai/amendments/action", { id, action }, "Guideline update failed");
     fetchAmendments();
   }
 
@@ -106,22 +123,16 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
   }
 
   async function saveSignature() {
-    await fetch("/api/email/signature", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ signature }),
-    });
+    if (!(await postOk("/api/email/signature", { signature }, "Signature save failed"))) return;
     setSigSaved(true);
     setTimeout(() => setSigSaved(false), 1500);
   }
 
   async function toggleGmailSig(next: boolean) {
     setUseGmailSig(next);
-    await fetch("/api/email/signature", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ useGmail: next }),
-    });
+    if (!(await postOk("/api/email/signature", { useGmail: next }, "Signature setting failed"))) {
+      setUseGmailSig(!next);
+    }
   }
 
   useEffect(() => {
@@ -139,26 +150,18 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
   async function addBlock() {
     const username = blockInput.trim().replace(/^@/, "");
     if (!username) return;
-    await fetch("/api/blocklist", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username }),
-    });
+    if (!(await postOk("/api/blocklist", { username }, "Block failed"))) return;
     setBlockInput("");
     refetch();
   }
 
   async function unblock(senderId: string) {
-    await fetch("/api/blocklist/unblock", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ senderId }),
-    });
+    await postOk("/api/blocklist/unblock", { senderId }, "Unblock failed");
     refetch();
   }
 
   async function disconnectEmail() {
-    await fetch("/api/email/disconnect", { method: "POST" });
+    await postOk("/api/email/disconnect", undefined, "Disconnect failed");
     refetch();
   }
 

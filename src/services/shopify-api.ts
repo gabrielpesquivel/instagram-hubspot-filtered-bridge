@@ -15,7 +15,16 @@ export interface ShopifyOrderSummary {
   totalPrice: string;        // "24.50 AUD"
   lineItems: { title: string; variantTitle?: string; quantity: number }[];
   tracking: { company?: string; number?: string; url?: string }[];
+  /** Per shipment: carrier status + the latest scan events, newest first. */
+  shipments: {
+    status: string;               // IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED, ATTEMPTED_DELIVERY, FAILURE, FULFILLED (no scans yet)…
+    shippedAt?: string;
+    deliveredAt?: string;
+    estimatedDeliveryAt?: string;
+    latestEvents: { status: string; at: string; message?: string; place?: string }[];
+  }[];
   shippingCountry?: string;
+  shippingCity?: string;
 }
 
 // Shape of the GraphQL order node we request.
@@ -26,9 +35,16 @@ interface OrderNode {
   displayFulfillmentStatus: string | null;
   currentTotalPriceSet: { presentmentMoney: { amount: string; currencyCode: string } } | null;
   customer: { firstName: string | null; lastName: string | null; email: string | null } | null;
-  shippingAddress: { country: string | null } | null;
+  shippingAddress: { country: string | null; city: string | null; province: string | null } | null;
   lineItems: { edges: { node: { title: string; variantTitle: string | null; quantity: number } }[] };
-  fulfillments: { trackingInfo: { company: string | null; number: string | null; url: string | null }[] }[];
+  fulfillments: {
+    displayStatus: string | null;
+    createdAt: string;
+    deliveredAt: string | null;
+    estimatedDeliveryAt: string | null;
+    trackingInfo: { company: string | null; number: string | null; url: string | null }[];
+    events: { nodes: { status: string; happenedAt: string; message: string | null; city: string | null; country: string | null }[] };
+  }[];
 }
 
 interface OrdersResponse {
@@ -42,9 +58,13 @@ const ORDERS_QUERY = `query($q: String!, $n: Int!) {
       name createdAt displayFinancialStatus displayFulfillmentStatus
       currentTotalPriceSet { presentmentMoney { amount currencyCode } }
       customer { firstName lastName email }
-      shippingAddress { country }
+      shippingAddress { country city province }
       lineItems(first: 20) { edges { node { title variantTitle quantity } } }
-      fulfillments { trackingInfo { company number url } }
+      fulfillments {
+        displayStatus createdAt deliveredAt estimatedDeliveryAt
+        trackingInfo { company number url }
+        events(first: 3, sortKey: HAPPENED_AT, reverse: true) { nodes { status happenedAt message city country } }
+      }
     } }
   }
 }`;
@@ -77,7 +97,20 @@ function normalize(node: OrderNode): ShopifyOrderSummary {
       return { title: e.node.title, ...(variant ? { variantTitle: variant } : {}), quantity: e.node.quantity };
     }),
     tracking,
+    shipments: node.fulfillments.map((f) => ({
+      status: f.displayStatus || "UNKNOWN",
+      shippedAt: f.createdAt,
+      deliveredAt: f.deliveredAt || undefined,
+      estimatedDeliveryAt: f.estimatedDeliveryAt || undefined,
+      latestEvents: (f.events?.nodes || []).map((e) => ({
+        status: e.status,
+        at: e.happenedAt,
+        message: e.message || undefined,
+        place: [e.city, e.country].filter(Boolean).join(", ") || undefined,
+      })),
+    })),
     shippingCountry: node.shippingAddress?.country || undefined,
+    shippingCity: [node.shippingAddress?.city, node.shippingAddress?.province].filter(Boolean).join(", ") || undefined,
   };
 }
 

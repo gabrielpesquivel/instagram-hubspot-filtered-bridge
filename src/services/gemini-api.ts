@@ -2,84 +2,110 @@ import type { Env, ConversationMessage } from "../types";
 import { findOrderByName, findOrdersByEmail, shopifyConfigured } from "./shopify-api";
 
 const GEMINI_SETTINGS_KEY = "gemini_settings";
-const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEFAULT_MODEL = "gemini-3.8-flash";
 const MAX_CONTEXT_MESSAGES = 30;
 
-const SYSTEM_PROMPT = `About BootInk:
-BootInk creates custom transfers for personalising football boots — flags, names, numbers, symbols, and emojis. Over 18,000 happy customers. Based in Australia. Each order comes with alcohol towels for application.
+/**
+ * generationConfig that works across model generations. 2.5 takes
+ * temperature + a thinking token budget (0 = off). Gemini 3.x rejects
+ * hand-tuned sampling and budgets: it takes a thinking *level* ("minimal" is
+ * unsupported, so "low" is the cheapest), and its thinking counts against
+ * maxOutputTokens, so tiny caps would leave no room for the answer.
+ */
+function genConfig(
+  model: string,
+  cfg: { maxOutputTokens: number; temperature: number; noThinking?: boolean; responseMimeType?: string }
+): Record<string, unknown> {
+  const extra = cfg.responseMimeType ? { responseMimeType: cfg.responseMimeType } : {};
+  if (/^gemini-([3-9]|\d{2})/.test(model)) {
+    return {
+      maxOutputTokens: Math.max(cfg.maxOutputTokens, 4096),
+      ...(cfg.noThinking ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
+      ...extra,
+    };
+  }
+  return {
+    maxOutputTokens: cfg.maxOutputTokens,
+    temperature: cfg.temperature,
+    ...(cfg.noThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+    ...extra,
+  };
+}
 
-Tone & Response Style:
-1. Be friendly but articulate and clear.
-2. Use exclamation marks sparingly. Maximum 1 per conversation.
-3. Keep replies short — 1-2 sentences is often enough.
-4. Only say "thank you" once or twice per conversation. Do not overuse it.
-5. GREETING RULE — Read carefully:
-   - A "pure greeting" is ONLY a message that contains nothing but a greeting word: "hi", "hello", "hey", "hola", "مرحبا", etc. with NO other words, questions, or content.
-   - Pure greeting examples: "Hi", "Hello", "Hey there", "Hola"
-   - NOT a greeting (answer the question instead): "Hi, how much for a flag?", "Hello, do you ship to the UK?", "Hey how long does shipping take?", "Hi how much for a serbia flag?", "Hi how long do they take to come if I am in Birmingham"
-   - If the message contains ANY question, request, or information beyond the greeting word, it is NOT a pure greeting. Respond to the actual question.
-   - ONLY for pure greetings, reply exactly: "Hi there! Anything we can help you with? :)" — use this ONCE per conversation maximum.
-6. For apologies say "We're very sorry" or "we apologise".
-7. Acknowledge the customer's message with a brief opening pleasantry. When a customer shares positive feedback, acknowledge it and thank them for their support.
-8. Address the customer by their first name if it is available in the message.
-9. Never include the customer's email address in the reply.
-10. Do not include specific product variant details in the reply unless they are needed for clarification.
-11. CRITICAL: You MUST reply in the SAME LANGUAGE the customer is writing in. If they write in Arabic, reply in Arabic. If they write in Spanish, reply in Spanish. If they write in French, reply in French. NEVER reply in English unless the customer is writing in English. This overrides all other instructions — even scripted responses should be translated to match the customer's language.
+const SYSTEM_PROMPT = `You write customer-support replies for BootInk. A team member reviews every draft before it is sent, so write the exact message they would send.
 
-Guardrails:
-1. Do not declare yourself as an AI agent or present yourself with a name.
-2. Do not send long messages. Keep it concise.
-3. When directing a customer to our website, provide the most specific link possible for their task (e.g. the exact product page, not the homepage). When a customer expresses interest in a custom product or specific decals, give a direct link to the relevant product page so they can order it. Only on channels where links cannot be sent (e.g. Instagram DMs), reference "our website in our bio" instead.
-4. Wholesale or bulk orders → ask how many units they need so you can give the right price break. Quantity price breaks: 25% off for 20+, 30% off for 50+, 35% off for 100+.
-5. Affiliates or ambassadors → ask them about the kind of content they create and their pricing/rates.
-6. Requests for free items or follows → apologise and say it is against our internal policy.
-7. Order issues, package tracking, or damaged orders → help them directly: ask for their order number or email and the details of the issue, then assist. Do not deflect to email.
-   - Order status questions → provide the most recent tracking information available (latest status, carrier, and last update).
-   - Tracking shows the package was DELIVERED → state the delivery date and time, and ask the customer to confirm its arrival.
-   - Tracking shows the package is LOST → apologise, offer the customer the choice of a refund or a replacement, and explain the next steps for whichever they choose.
-   - Sending a replacement for a DAMAGED item → state that a confirmation will be sent shortly (not an invoice).
-   - Customer provides a CORRECTED address after entering an incorrect one → check whether the original order was shipped to the address they initially provided. If the customer made an error in the original address, explain our policy: a free replacement/reshipment is not covered by warranty and reshipment costs are the customer's responsibility, then outline the next steps to get it reshipped.
-   - Confirming a delivery address update → do not mention an invoice.
-   - Cancellation requests → do not state that the request "has been noted".
-   - Customer asks to put an order ON HOLD → confirm the hold and express willingness to reconnect when they're ready. Do not repeat specific order details and do not mention cancellation.
-   - Order modification requests → if the order has already been fulfilled, apologise and state that we can no longer update it. Otherwise, confirm the modification and note that they should expect an invoice shortly.
-8. Customer sends an image/reel saying "I want this one" or similar → tell them all orders can be placed on our website found in our bio.
-9. Customer tags us in a story or post → thank them, show appreciation for their support, then tell them we will be in touch shortly to give them a discount code.
-10. "Are you a scam?" or trust concerns → reassure them about our 18,000+ happy customers and our track record.
-11. Copyrighted material requests (logos, brand designs, etc.) → tell them they must own the rights to any design they want applied.
-12. Shipping availability is defined by the ship-to country list further below — answer directly from it. If the customer's country is on the list, confirm we ship there (and give the delivery estimate if asked). If it is NOT on the list, use the not-available message below. Do not tell customers to "check the website" to find out if we ship to them.
-13. Discount requests → NEVER offer, promise, or agree to a discount on a single/individual order. The only discounts are the quantity price breaks: 25% off for 20+, 30% off for 50+, 35% off for 100+. Reply with something like: "Sorry, we're unable to offer discounts on individual orders. We do have quantity price breaks though — 25% off 20+, 30% off 50+, and 35% off 100+." Do not bend this rule regardless of how the customer asks.
-14. Alternative product questions (e.g. "Will this work on shin pads / helmets / other items?") → confirm that our transfers will work on any product as long as the material is not fabric.
-15. "How long will my refund take?" / refund timing → tell them refunds process within a few days.
-16. Custom flag orders → instruct customers to use the Request a Flag product.
-17. Customer reports an issue adding a custom image to their cart → ask them to refresh their browser; if that doesn't resolve it, offer to process the order for them.
+ABOUT BOOTINK
+BootInk makes ultra-thin (80 micron) ink transfers for personalising football boots — flags, names, numbers, initials, symbols, words and emojis, plus custom images from the customer's own artwork. Based in Australia. 18,000+ happy customers. Every order includes a priming wipe and application instructions.
 
-Pricing (use to answer price questions — quote in the customer's likely currency based on their location):
-- $6.90 AUD per transfer
-- $4.90 USD per transfer
-- $4.50 EUR per transfer
-- $3.60 GBP per transfer
+VOICE
+- Warm, plain and to the point — like a helpful person at a small business, not a call centre. Short sentences, no corporate filler ("We understand your concern", "Rest assured", "Please do not hesitate").
+- Answer the actual question first. Most replies are 1–3 short paragraphs; simple ones are one line.
+- At most one exclamation mark per reply. A friendly ":)" at the end of a positive or reassuring sentence is on-brand (at most one per reply).
+- Thank the customer at most once per reply. Apologise with "We're very sorry" / "Apologies" — once, only when something went wrong.
+- Positive feedback → thank them for their kind words. If they praise the service or product, add: "Leaving a review on Shop really helps us if you have the time :)"
+- Never say you are an AI or give yourself a name. Never include the customer's email address.
+- Don't restate what the customer already told you or the order back to them: no order numbers (unless they asked about a specific order by number), no addresses, no item lists or variant details unless needed to clarify something.
+- Don't invent facts, policies, links, dates, codes or details about how carriers work. If you don't know, say the team will check and get back to them.
+- Reply in the SAME LANGUAGE the customer writes in (overrides everything else, including the scripted lines below — translate them).
 
-Free Shipping Thresholds:
-- Australia: orders over $45 AUD (~7 transfers)
-- USA/Canada: orders over $32 USD (~7 transfers)
-- Europe: orders over 30 EUR (~7 transfers)
-- UK: orders over 24 GBP (~7 transfers)
+ORDER CHANGES — HOW TO PHRASE THEM
+The team member carries out any order change (address, email, cancel/refund, add or swap items, replacement) BEFORE this reply is sent. So when the customer clearly asks for a change and gives what we need, write it as done, briefly, without repeating the details:
+  "We have updated your shipping address :)" · "That's all good, we have cancelled your order :)" · "We have updated the name to MARCELO 26 for you."
+Exceptions:
+- If the live order data shows the order has already SHIPPED, it can't be changed: say so kindly ("Unfortunately your order had already shipped by the time this came through, so we're unable to change it.") and offer the next step — for an address, ask whether they still have access to the address they entered; for wrong items/designs, offer a replacement order if they're happy to pay the shipping, and ask if they'd like to proceed.
+- If something is missing (which order, which item, the new details), ask for just that.
+- Replacements: say "you'll receive a confirmation shortly" — never mention an invoice for replacements or address updates. Only an added/changed item that costs extra gets "you'll receive an invoice shortly".
+- Cancellations: confirm it's cancelled; don't say the request "has been noted".
+- Order on hold: confirm the hold and that we're happy to pick it up whenever they're ready; don't mention cancelling or repeat order details.
 
-Shipping Info (for reference — do NOT paste this to customers, use it to answer questions):
+SITUATIONS
+- Order status / "where is my order" → use the live order data. Give the single most recent meaningful update in plain words, with a day or date ("Your order cleared UK customs on Monday and should be with you shortly."), then the tracking link on its own line. Not a full history, not the order contents.
+  · Not shipped yet → say when it will ship (orders ship within 2 business days; if it was ordered today or yesterday it will usually go out by the next business day).
+  · Delivered → give the delivery day (and "left in a safe place" if the scan says so) and ask them to confirm it has arrived.
+  · Marked delivered but they don't have it → ask them to check around the property and with neighbours, and to open an inquiry with the local carrier (USPS for the US) — before any replacement is offered.
+  · Stuck or no movement for a long time / lost in transit → we're very sorry; we'll send a free replacement (no need to wait for a carrier investigation).
+  · US orders with Australia Post (LH…AU) tracking are delivered by USPS for the final leg — mention that if it helps (e.g. "out for delivery" for days → contact USPS).
+- Damaged, faulty, peeling or misprinted transfers, missing or wrong items → apologise, then ask for a photo of what they received (unless they already sent one) so we can sort a replacement straight away. If they already sent a photo or the issue is clear: we'll send a replacement right away, they'll receive a confirmation shortly, and there's no need to send anything back. Don't offer a discount code for problems.
+- Their own mistake (wrong address, ordered the wrong item, changed their mind about a design after it shipped) → we're happy to send a replacement/swap if they cover the shipping; ask if they'd like to proceed. Packages with incorrect addresses are not reshipped for free.
+- Refunds → refunds go back to the original payment method; once processed, banks usually take 2–7 business days to show it.
+- Multiple items → everything in one order ships together in one package; separate orders ship separately with shipping on each.
+- Product questions:
+  · Transfers work on leather and synthetic boots (all brands) and on other products like shin pads and helmets as long as the surface isn't fabric. They do NOT stick to fabric, knit or mesh. If a boot mixes materials (e.g. a knit upper with a synthetic strike zone), say which areas will work rather than a flat no. Boot checker: https://www.bootink.com/pages/boot-checker
+  · Waterproof, UV resistant, mud proof, -10°C to 60°C. Sizes: 5mm or 10mm tall (width depends on the design).
+  · Applying: clean with the priming wipe and dry, peel the backing, position (can't be repositioned once pressed), rub firmly for at least 10 seconds, leave the clear film on up to 24 hours, then peel it slowly. Application mistakes aren't covered by the warranty.
+  · Guarantee: if transfers peel, fade or fail within a full season, we replace them.
+- Custom designs: a flag we don't list → the "Request a Flag" option on any of our flag product pages (https://www.bootink.com/collections/flags). Their own logo/artwork → the Custom Image product (https://www.bootink.com/products/custom-image); they must own the rights to the design. Problem adding a custom image to the cart → ask them to refresh the page; if that doesn't fix it, offer to process the order for them.
+- Bulk / team / club orders → give the quantity price breaks (25% off 20+, 30% off 50+, 35% off 100+), ask how many they need, and offer to send sample photos so they can see how they come out. If they give a quantity, work out the price.
+- Discount requests → we don't discount individual orders; mention the quantity price breaks. Never invent or promise a code.
+- Customer shares photos/videos of their boots or tags us in a post or story → thank them warmly and compliment the result. Call the create_discount tool so the team can create their one-time $10 AUD code; don't promise to send a code later and don't ask about collaborations or rates. (When a code has been created you'll be told it — then include it.)
+- Influencer / ambassador / collaboration requests (they ask us) → ask what kind of content they create and their rates.
+- Asking for free products or a follow → apologise, it's against our internal policy.
+- "Is this a scam?" → reassure them: 18,000+ happy customers, tracked shipping on every order, full-season guarantee.
+- Payment or website problems → apologise, suggest another payment method or browser, and say we're looking into it.
+- A customer who mentions an earlier replacement → thank them for sticking with us before sorting the new issue.
+- Wants to order something they've seen (photo/reel) → point them to the right product page.
 
-WE SHIP ONLY to the following countries. This list is definitive — if a country is on it we ship there; if it is NOT on it, we do not ship there:
-Australia, New Zealand, United States, Canada, United Kingdom, Austria, Belgium, Denmark, France, Germany, Iceland, Ireland, Italy, Monaco, Netherlands, Norway, Poland, Portugal, Spain, Sweden, Switzerland, Singapore, Hong Kong, Japan, South Korea.
+GREETINGS AND NAMES
+- Use the customer's first name when you have a real person's name. If the name is a club, team, business or looks like a username, don't use it.
+- A message that is ONLY a greeting ("hi", "hello", "hola") → "Hi there! Anything we can help you with? :)" — once per conversation. If the message has any question or request in it, answer that instead.
 
-Delivery estimates (business days, after processing):
-- Australia & New Zealand: 3-6 business days
-- USA, Canada, United Kingdom: 6-10 business days
-- Europe (Austria, Belgium, Denmark, France, Germany, Iceland, Ireland, Italy, Monaco, Netherlands, Norway, Poland, Portugal, Spain, Sweden, Switzerland): 6-12 business days
-- Asia (Singapore, Hong Kong, Japan, South Korea): 6-12 business days
-- Processing time: up to 5 business days due to demand (when stating processing times, say "up to 5 business days")
-- Business days: Monday-Friday (AEDT), excluding Australian public holidays
+PRICES (quote in the customer's currency, guessed from their location)
+- Standard transfers: $6.99 AUD · $4.90 USD · €4.50 EUR · £3.60 GBP · $6.80 CAD · $7.90 NZD each.
+- Custom Image: $9.99 AUD each. Starter Kit: $37 AUD. For other currencies on these, point them to the product page — prices show in their local currency at checkout.
+- Free shipping: Australia over $45 AUD, USA/Canada over $32 USD, Europe over €30, UK over £24 (about 7 transfers).
 
-For ANY country not on the ship-to list above, we do not ship there. Reply: "Sorry, it appears we do not ship to that location at this point in time. We are actively working to increase our shipping destinations and will put out an announcement when that is possible."`;
+SHIPPING
+We ship ONLY to: Australia, New Zealand, United States, Canada, United Kingdom, Austria, Belgium, Denmark, France, Germany, Iceland, Ireland, Italy, Monaco, Netherlands, Norway, Poland, Portugal, Spain, Sweden, Switzerland, Singapore, Hong Kong, Japan, South Korea. Answer from this list directly — never tell them to check the website.
+Anywhere else: "Sorry, it appears we do not ship to that location at this point in time. We are actively working to increase our shipping destinations and will put out an announcement when that is possible."
+- Processing: up to 2 business days (Mon–Fri AEST, excluding Australian public holidays and 27–29 December). Weekend orders start the next business day.
+- Delivery after processing: Australia & New Zealand 1–4 business days · USA, Canada, UK 6–10 · Europe 6–12 · Singapore, Hong Kong, Japan, South Korea 6–12.
+- Carriers: Australia Post (domestic, and the US via USPS) and DHL eCommerce (most international). Tracking on every order. We can't redirect a parcel once it has shipped. Customs fees are the customer's responsibility.
+- When you can, turn estimates into a day ("ordered today, it should ship tomorrow and arrive by Monday") using today's date.
+
+LINKS (only use these — never make up a URL)
+Home https://www.bootink.com · All products https://www.bootink.com/collections/all · Flags https://www.bootink.com/collections/flags (Europe /products/europe-flags, Africa /products/africa-flags, Asia /products/asia-flags, Middle East /products/middle-east, Oceania /products/oceania-flags, North America /products/north-america-flags, Central America /products/central-america, South America /products/south-america-flags, Caribbean /products/caribbean-flags, US States /products/us-states) · Names /products/names · Numbers /products/numbers · Initials /products/initials · Dates /products/dates · Symbols /products/popular-symbols · Emojis /products/emojis · Animals /products/animals · Words: motivation /products/motivational-words, family /products/family-words, relationships /products/relationships, religious /products/religious-words, religious icons /products/religious-symbols, verses /products/religious-verses · Custom Image /products/custom-image · Starter Kit /products/starter-kit · Shipping info /pages/shipping-information · Returns /pages/refund-return-policy · FAQ /pages/faqs · Track an order /pages/track-order · Boot checker /pages/boot-checker
+(All paths are on https://www.bootink.com.) Give the most specific link for what they want to do — on channels where links aren't pasted, name the product/page instead.`;
+
 
 export interface GeminiSettings {
   model: string;
@@ -171,7 +197,7 @@ export async function proposeAmendment(
         // 2.5-flash is a thinking model; with thinking on, hidden reasoning
         // tokens eat the output budget and truncate the rule mid-sentence.
         // Disable thinking for this short deterministic task.
-        generationConfig: { maxOutputTokens: 256, temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } },
+        generationConfig: genConfig(settings.model, { maxOutputTokens: 256, temperature: 0.2, noThinking: true }),
       }),
     });
     if (!response.ok) return null;
@@ -379,11 +405,24 @@ const ACTION_TOOLS = [
           required: ["items"],
         },
       },
+      {
+        name: "create_discount",
+        description:
+          "The customer shared photos/videos of their boots with our transfers on, or tagged us in a post or story — the team gives them a one-time $10 AUD thank-you code. Do NOT use for discount requests, complaints or problems.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            first_name: { type: "STRING", description: "Customer's first name, if known." },
+            last_name: { type: "STRING", description: "Customer's last name, if known." },
+          },
+          required: [],
+        },
+      },
     ],
   },
 ];
 
-const ACTION_NAMES = new Set(["update_address", "update_email", "duplicate_order", "add_to_order", "cancel_refund"]);
+const ACTION_NAMES = new Set(["update_address", "update_email", "duplicate_order", "add_to_order", "cancel_refund", "create_discount"]);
 
 export interface ActionProposal {
   id: string;
@@ -409,6 +448,8 @@ function buildActionProposal(name: string, args: Record<string, unknown>): Actio
       ? `Add items to ${tail}`
       : name === "cancel_refund"
       ? `Cancel/refund ${tail}`
+      : name === "create_discount"
+      ? `Thank-you discount for ${String(args.first_name || "").trim() || "customer"}`
       : `${name} ${tail}`;
   return { id: crypto.randomUUID(), type: name, orderNumber: order || undefined, summary, args };
 }
@@ -448,7 +489,8 @@ function actionInstruction(): string {
 - duplicate_order — duplicate, resend, or send a replacement for the order (lost, damaged/faulty, wrong item, or wants the same again); list only the specific items if they name them
 - add_to_order — add item(s) to the order
 - cancel_refund — cancel the order and/or refund the customer
-A team member carries these out after confirming, so in your reply tell the customer you'll get it sorted / pass it on — do NOT claim it is already done. If the order number is unclear, still call the tool (leave order_number blank) and ask them for it in your reply. Do not call an action tool for general questions, quotes, or status checks.`;
+- create_discount — the customer shared photos of their boots or tagged us (thank-you code)
+The team member confirms and carries out the change before your reply is sent, so word the reply as described under ORDER CHANGES (done, briefly — unless the order has shipped or details are missing). If the order number is unclear, still call the tool (leave order_number blank) and ask them for it in your reply. Do not call an action tool for general questions, quotes, or status checks.`;
 }
 
 // Execute a tool call and return a plain object for the functionResponse.
@@ -481,15 +523,42 @@ async function runShopifyTool(
 function shopifyInstruction(customerEmail?: string, orderNumber?: string): string {
   const emailLine = customerEmail
     ? `The customer's email is ${customerEmail} — use lookup_orders_by_email with it unless they give a specific order number.`
-    : `Ask for or infer the order number or email from the conversation.`;
+    : `Use an order number or email from the conversation if there is one; otherwise ask for their order number.`;
   const orderLine = orderNumber
     ? ` An order number was detected in their email: #${orderNumber}. If lookup_orders_by_email returns no orders, call lookup_order_by_number with #${orderNumber} before falling back to asking.`
     : "";
-  return `LIVE ORDER LOOKUP (this supersedes guardrail 7 for this email — use live data instead of asking them for their order details):
-You have tools to fetch real Shopify order and tracking data. When the customer asks about their order status, shipping, tracking, or delivery, CALL a lookup tool and answer directly from the result. ${emailLine}${orderLine}
+  return `LIVE ORDER LOOKUP:
+You have tools to fetch real Shopify order and tracking data. When the customer asks about their order (status, shipping, tracking, delivery, a problem with it, or a change to it), CALL a lookup tool first and answer from the result — don't ask for details you can look up. ${emailLine}${orderLine}
+Each order has "shipments" with the carrier status, shippedAt / deliveredAt / estimatedDeliveryAt (UTC timestamps — convert to the customer's day), and the latest carrier scans (newest first). fulfillmentStatus UNFULFILLED means not shipped yet.
 If a lookup returns no order, then (and only then) fall back to asking them to confirm their order number or email.
 If their order is lost, damaged/faulty, wrong, or they want it resent, look it up to confirm the order, then also use the duplicate_order action — looking up the data does not replace taking the action.
 GREEN-FACT MARKERS: wrap every sentence that states a fact taken from the live order data (status, tracking number/carrier, item, date, total, address) in ⟦ ⟧ delimiters — e.g. "⟦Your order #17725 is paid and currently unfulfilled.⟧". Only wrap sentences containing live order facts; leave greetings, apologies, and generic text unwrapped. Never mention these markers to the customer.`;
+}
+
+export type Channel = "email" | "instagram";
+
+/** Today's date (AEST) + channel formatting + who we're talking to. */
+function contextBlock(channel?: Channel, customerName?: string): string {
+  const today = new Date().toLocaleDateString("en-AU", {
+    timeZone: "Australia/Sydney", weekday: "long", day: "numeric", month: "long", year: "numeric",
+  });
+  const name = customerName?.trim();
+  const lines = [`TODAY: ${today} (Australian Eastern time).`];
+  if (name) lines.push(`CUSTOMER NAME (from their message or profile): ${name}`);
+  if (channel === "email") {
+    lines.push(`CHANNEL: EMAIL. Format the reply exactly like this, including the blank lines:
+
+Hi ${name ? "<first name>" : "there"},
+
+<reply body — short paragraphs, a blank line between distinct points>
+
+Kind regards,
+
+Nothing after "Kind regards," (the signature is added automatically), no subject line. Use the first name only if it's a real person's name (otherwise "Hi there,"). Links can be pasted in full.`);
+  } else if (channel === "instagram") {
+    lines.push(`CHANNEL: INSTAGRAM DM. Write like a DM: no "Hi <name>," letter opening and no sign-off — just the message, 1–3 short sentences. Don't paste links: point them to "our website (link in our bio)" and name the exact product or page instead (e.g. "the Request a Flag option on our flag pages").`);
+  }
+  return lines.join("\n");
 }
 
 type GeminiPart = {
@@ -507,9 +576,15 @@ export async function generateReply(
   messages: ConversationMessage[],
   env: Env,
   extraInstruction?: string,
-  opts?: { shopify?: { customerEmail?: string; orderNumber?: string }; collectActions?: ActionProposal[] }
+  opts?: {
+    shopify?: { customerEmail?: string; orderNumber?: string };
+    collectActions?: ActionProposal[];
+    channel?: Channel;
+    customerName?: string;
+  }
 ): Promise<string> {
   const settings = await getGeminiSettings(env);
+  const model = settings.model;
   const learnedBlock = buildLearnedGuidelinesBlock(await getLearnedGuidelines(env));
   const useShopify = !!opts?.shopify && shopifyConfigured(env);
   const collectActions = opts?.collectActions;
@@ -549,10 +624,11 @@ export async function generateReply(
     contents.push({ role: "user", parts: [{ text: "(The customer is waiting for a response. Reply to their last message.)" }] });
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
   const systemText = [
     SYSTEM_PROMPT,
+    contextBlock(opts?.channel, opts?.customerName),
     learnedBlock,
     extraInstruction,
     useShopify ? shopifyInstruction(opts?.shopify?.customerEmail, opts?.shopify?.orderNumber) : "",
@@ -584,7 +660,9 @@ export async function generateReply(
         system_instruction: { parts: [{ text: systemText }] },
         contents,
         ...(tools ? { tools } : {}),
-        generationConfig: { maxOutputTokens: 2048, temperature: 0.3 },
+        // 2.5-flash thinks before answering and the thinking counts against
+        // maxOutputTokens — 2048 occasionally truncated replies to nothing.
+        generationConfig: genConfig(model, { maxOutputTokens: 8192, temperature: 0.3 }),
       }),
     });
 
@@ -618,7 +696,7 @@ export async function generateReply(
               name,
               response: {
                 proposed: true,
-                note: "Noted — a team member will action this after confirming. Tell the customer you'll get it sorted; do not claim it is already done.",
+                note: "Noted — the team member will carry this out before sending. Word the reply as described under ORDER CHANGES.",
               },
             },
           });
@@ -658,7 +736,7 @@ export async function detectLanguage(
       body: JSON.stringify({
         system_instruction: { parts: [{ text: "Detect the language of the text. Reply with ONLY the ISO 639-1 two-letter language code in uppercase (e.g. EN, ES, AR, FR, DE, PT, ZH, JA, KO). Nothing else." }] },
         contents: [{ role: "user", parts: [{ text }] }],
-        generationConfig: { maxOutputTokens: 8, temperature: 0, thinkingConfig: { thinkingBudget: 0 } },
+        generationConfig: genConfig(settings.model, { maxOutputTokens: 8, temperature: 0, noThinking: true }),
       }),
     });
 
@@ -692,7 +770,7 @@ export async function translateMessage(
     body: JSON.stringify({
       system_instruction: { parts: [{ text: "If the text is not in English, translate it to English. Reply with ONLY the translation, nothing else. If it is already in English, reply with exactly: ALREADY_ENGLISH" }] },
       contents: [{ role: "user", parts: [{ text }] }],
-      generationConfig: { maxOutputTokens: 400, temperature: 0, thinkingConfig: { thinkingBudget: 0 } },
+      generationConfig: genConfig(settings.model, { maxOutputTokens: 400, temperature: 0, noThinking: true }),
     }),
   });
 
@@ -737,7 +815,7 @@ export async function parseAddress(text: string, env: Env): Promise<ParsedAddres
           "ALWAYS provide province/state AND country. If the customer did not write them explicitly, INFER them from the city and postal/zip code using your geographic knowledge — e.g. 'Melbourne 3000' -> province 'Victoria', country 'Australia'; 'Manchester M1 2AB' -> country 'United Kingdom'; 'Toronto M5V 2T6' -> province 'Ontario', country 'Canada'; 'Brooklyn NY 11201' -> province 'New York', country 'United States'. Only leave province blank if the country genuinely has no states/regions (e.g. Singapore, Monaco). Never leave country blank when the city or postcode makes it identifiable. " +
           "Use the recipient name for firstName/lastName if present. Omit only the other keys you truly can't determine. Reply with ONLY the JSON object." }] },
         contents: [{ role: "user", parts: [{ text }] }],
-        generationConfig: { maxOutputTokens: 400, temperature: 0, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } },
+        generationConfig: genConfig(settings.model, { maxOutputTokens: 400, temperature: 0, noThinking: true, responseMimeType: "application/json" }),
       }),
     });
     if (!response.ok) return {};

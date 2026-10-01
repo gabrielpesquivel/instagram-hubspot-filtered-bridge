@@ -236,7 +236,10 @@ async function processMessage(
             timestamp: new Date().toISOString(),
           };
           const messagesForReply = [...existingConv.messages, newMsg];
-          const reply = await generateReply(messagesForReply, env);
+          // Sent straight to the customer — no order tools (they'd add ⟦⟧
+          // fact markers the composer normally strips).
+          const reply = (await generateReply(messagesForReply, env, undefined, { channel: "instagram" }))
+            .replace(/⟦|⟧/g, "");
           const sent = await sendMessage(senderId, reply, env);
           // Store the reply either way — failed sends show in the dashboard
           // with a retry button instead of disappearing silently

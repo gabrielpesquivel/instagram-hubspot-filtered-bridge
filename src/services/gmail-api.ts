@@ -1,6 +1,6 @@
 // Thin Gmail REST client. Lists unread inbox threads, parses their plain-text
 // bodies for AI reply suggestions, sends threaded replies, and updates labels
-// (mark read / archive).
+// (mark read).
 const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 
 export interface EmailThreadSummary {
@@ -184,6 +184,28 @@ function parseFromName(from: string): string {
 function emailAddress(from: string): string {
   const m = from.match(/<([^>]+)>/);
   return (m ? m[1] : from).trim().toLowerCase();
+}
+
+/** Flag emails that aren't real customer inquiries — payout notices, platform
+ *  notifications, marketing blasts — by sender address/domain and telltale
+ *  subject/snippet phrases. The auto-draft cron skips these; the dashboard
+ *  keeps an identical copy (Inbox.tsx) for its orange triage tint, so keep the
+ *  two in sync. */
+export function isAutomatedEmail(from: string, subject: string, snippet: string): boolean {
+  const addr = emailAddress(from);
+  // Shopify relays the website contact form through its own domains, so those
+  // are real customers — only Shopify's payout notifications get flagged.
+  if (/@(?:[a-z0-9-]+\.)*(shopify|shopifyemail)\.[a-z.]+$/i.test(addr)) {
+    return /payout/i.test(subject) || /payout/i.test(snippet);
+  }
+  const fromPat =
+    /(no-?_?reply|do-?not-?reply|mailer-daemon|postmaster|notifications?@|alerts?@|payouts?@|billing@|invoic(e|ing)@|receipts?@|newsletters?@|marketing@|promo(tions)?@|news@|updates?@)/i;
+  const domainPat =
+    /@(?:[a-z0-9-]+\.)*(paypal|stripe|starshipit|xero|facebookmail|instagram|meta|canva|google|linkedin|tiktok|klaviyo|mailchimp)\.[a-z.]+$/i;
+  const subjPat =
+    /(payout|payment (?:sent|received|processed)|invoice|receipt\b|statement\b|verification code|verify your|security alert|password reset|confirm your (?:email|subscription)|newsletter|unsubscribe|% ?off|sale (?:ends|starts)|shipping label|billing)/i;
+  const snipPat = /unsubscribe|view (?:this email )?in (?:your )?browser|manage (?:your )?preferences/i;
+  return fromPat.test(addr) || domainPat.test(addr) || subjPat.test(subject) || snipPat.test(snippet);
 }
 
 /** GET with backoff retries on 429/5xx — a silent null here used to drop
@@ -435,11 +457,6 @@ export async function getAttachment(
 /** Mark a thread read (remove the UNREAD label). Best-effort. */
 export async function markThreadRead(token: string, threadId: string): Promise<boolean> {
   return modifyThread(token, threadId, { removeLabelIds: ["UNREAD"] });
-}
-
-/** Archive a thread (remove it from the inbox). Best-effort. */
-export async function archiveThread(token: string, threadId: string): Promise<boolean> {
-  return modifyThread(token, threadId, { removeLabelIds: ["INBOX"] });
 }
 
 async function modifyThread(
