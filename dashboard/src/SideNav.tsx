@@ -89,10 +89,15 @@ const GROUPS: { heading: string; items: NavItem[] }[] = [
     ],
   },
   {
-    heading: "Operations",
+    heading: "Printing",
     items: [
       { tool: "gangsheet", hash: "#/gangsheet", label: "Gangsheet Generator", icon: ICONS.gangsheet },
       { tool: "cutfiles", hash: "#/printprep", label: "Print Prep", icon: ICONS.cutfiles },
+    ],
+  },
+  {
+    heading: "Operations",
+    items: [
       { tool: "stocktake", hash: "#/stocktake", label: "Stock View", icon: ICONS.stocktake },
       { tool: "roster", hash: "#/roster", label: "Roster", icon: ICONS.roster },
     ],
