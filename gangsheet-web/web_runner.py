@@ -15,7 +15,7 @@ os.environ.setdefault('MPLBACKEND', 'Agg')
 sys.path.insert(0, '/gangsheet/app')
 
 import pandas as pd
-from PIL import Image
+from PIL import Image, ImageFilter
 
 from src import config, layout, pdf_utils
 import main as gangsheet_main
@@ -96,6 +96,31 @@ gangsheet_main.unary_union = _safe_unary_union
 # side, so it never touches the magenta cut border. 2.5mm makes each tier's max
 # height land exactly on the box interior (25-5=20, 55-5=50).
 CUSTOM_IMAGE_BOX_MARGIN_MM = 2.5
+# Alpha at or below this counts as background when trimming custom images.
+CUSTOM_IMAGE_TRIM_ALPHA = 24
+
+
+def _trim_to_artwork(path):
+    """Crop a downloaded custom image to its visible artwork so the customer's
+    requested height is the height of the design, not of the uploaded canvas
+    with its transparent (or background-removed) padding. Faint alpha and lone
+    specks left by background removal are ignored when finding the edges.
+    Rewrites the PNG in place; opaque images are left untouched."""
+    with Image.open(path) as im:
+        im.load()
+        if 'A' not in im.getbands() and 'transparency' not in im.info:
+            return
+        rgba = im.convert('RGBA')
+    mask = rgba.getchannel('A').point(lambda a: 255 if a > CUSTOM_IMAGE_TRIM_ALPHA else 0)
+    # Erode by 2 px so 1-4 px specks don't widen the box, then grow it back.
+    box = mask.filter(ImageFilter.MinFilter(5)).getbbox() or mask.getbbox()
+    if not box:
+        return
+    pad = 2
+    box = (max(0, box[0] - pad), max(0, box[1] - pad),
+           min(rgba.width, box[2] + pad), min(rgba.height, box[3] + pad))
+    if box != (0, 0, rgba.width, rgba.height):
+        rgba.crop(box).save(path, 'PNG')
 
 # Items collected per sheet name, waiting for render()
 _pending = {}
@@ -173,6 +198,7 @@ def _measure_image_items(items):
         if not path or not os.path.exists(path):
             continue
         try:
+            _trim_to_artwork(path)
             with Image.open(path) as im:
                 pw, ph = im.size
         except Exception:
