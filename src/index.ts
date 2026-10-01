@@ -110,7 +110,14 @@ import { handleGetShopReviews, handlePostShopReviews } from "./handlers/shop-rev
 import { handleGetNotes, handlePutNotes } from "./handlers/notes";
 import { handleGetRoster, handlePutRoster } from "./handlers/roster";
 import { handleSiteStatus, recordSitePing } from "./handlers/site-status";
-import { handleGetMetaAds, handleMetaAdsDebug, handleSetMetaAdsAccount } from "./handlers/meta-ads";
+import {
+  handleGetMetaAds,
+  handleMetaAdsDebug,
+  handleSetMetaAdsAccount,
+  handleGetMetaAdsDigest,
+  handleSetMetaAdsDigest,
+  sendWeeklyMetaAdsDigest,
+} from "./handlers/meta-ads";
 import { handleGetOrderGlobe, handleOrderGlobeBackfill, handleOrderGlobeRefresh, syncOrderGlobe } from "./handlers/order-globe";
 import { autoDraftEmails } from "./handlers/email-autodraft";
 import {
@@ -487,6 +494,12 @@ export default {
     if (path === "/api/meta-ads/account" && request.method === "POST") {
       return handleSetMetaAdsAccount(request, env);
     }
+    if (path === "/api/meta-ads/digest" && request.method === "GET") {
+      return handleGetMetaAdsDigest(request, env);
+    }
+    if (path === "/api/meta-ads/digest" && request.method === "POST") {
+      return handleSetMetaAdsDigest(request, env);
+    }
 
     // Shop (shop.app) review stats (home-page card; synced by a local
     // scraper — shop.app blocks datacenter IPs, see handlers/shop-reviews.ts)
@@ -571,6 +584,7 @@ export default {
   //  - 23:00 UTC  (~9am AEST) Shopify order pull, then automatic gangsheet
   //               render + .ai upload (Browser Rendering, no human input)
   //  - */10       pre-draft AI replies for new unread emails
+  //  - 23:00 UTC Sunday (~9am Monday AEST) weekly Meta Ads digest email
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     switch (event.cron) {
       case "0 3 * * *":
@@ -580,6 +594,9 @@ export default {
         // Saturday/Monday (AEST) store nothing — skip the render too.
         ctx.waitUntil(storeDailyOrders(env).then((stored) => (stored ? renderDailyGangsheet(env) : undefined)));
         ctx.waitUntil(refreshStockStats(env)); // stock estimates pick up yesterday's orders
+        break;
+      case "0 23 * * SUN":
+        ctx.waitUntil(sendWeeklyMetaAdsDigest(env));
         break;
       case "*/10 * * * *":
         ctx.waitUntil(autoDraftEmails(env));

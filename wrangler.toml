@@ -35,7 +35,8 @@ new_sqlite_classes = ["DMState"]
 # gangsheet render/upload (23:00 UTC ≈ 9am AEST), email auto-draft sweep
 # (every 10 min)
 [triggers]
-crons = ["0 3 * * *", "0 23 * * *", "*/10 * * * *"]
+# 0 23 * * SUN = Sunday 23:00 UTC ≈ Monday 9am AEST: weekly Meta Ads digest email
+crons = ["0 3 * * *", "0 23 * * *", "*/10 * * * *", "0 23 * * SUN"]
 
 # Browser Rendering — the daily cron drives the dashboard's own gangsheet page
 # headlessly (same Pyodide pipeline as a manual run) and uploads the finished
