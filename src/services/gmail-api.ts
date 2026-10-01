@@ -433,6 +433,31 @@ export async function sendThreadReply(token: string, args: SendReplyArgs): Promi
   return data.id || null;
 }
 
+/** Start a brand-new email thread (e.g. proactive delay outreach). Returns the
+ *  new message's thread id on success, or null on failure. */
+export async function sendNewEmail(
+  token: string,
+  args: { to: string; fromEmail: string; subject: string; body: string; html?: boolean }
+): Promise<string | null> {
+  const headers = [
+    `From: ${args.fromEmail}`,
+    `To: ${args.to}`,
+    `Subject: ${encodeHeader(args.subject)}`,
+    "MIME-Version: 1.0",
+    `Content-Type: text/${args.html ? "html" : "plain"}; charset="UTF-8"`,
+    "Content-Transfer-Encoding: 8bit",
+  ];
+  const mime = headers.join("\r\n") + "\r\n\r\n" + args.body;
+  const res = await fetch(`${GMAIL_BASE}/messages/send`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw: b64url(new TextEncoder().encode(mime)) }),
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { threadId?: string };
+  return data.threadId || null;
+}
+
 /** Fetch one attachment's raw bytes, or null if it can't be read. */
 export async function getAttachment(
   token: string,

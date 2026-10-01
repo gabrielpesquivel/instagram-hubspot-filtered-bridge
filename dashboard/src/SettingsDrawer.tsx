@@ -4,6 +4,7 @@ import { WebhookSubscriptions } from "./WebhookSubscriptions";
 import { FilterSettings } from "./FilterSettings";
 import { AgentSettings } from "./AgentSettings";
 import { toast } from "./toast";
+import { PromptTest } from "./PromptTest";
 
 // POST JSON and report whether it worked; toasts the server error (or a
 // network error) on failure so saves never fail silently.
@@ -57,6 +58,7 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
   const [pendingAmend, setPendingAmend] = useState<Amendment[]>([]);
   const [learnedAmend, setLearnedAmend] = useState<Amendment[]>([]);
   const [copied, setCopied] = useState(false);
+  const [testOpen, setTestOpen] = useState(false);
 
   const refetch = useCallback(async () => {
     const [m, f, a, b, e, s] = await Promise.all([
@@ -265,6 +267,14 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
           {/* AI guidelines */}
           <h3 style={styles.sectionTitle}>AI guidelines</h3>
           <div style={styles.block}>
+            <div style={styles.blockLabel}>Test prompt</div>
+            <p style={{ ...styles.hint, marginTop: 0 }}>
+              Before changing the prompt or model, run the fixed support scenarios through the live
+              prompt on two models side by side. Nothing is sent.
+            </p>
+            <button style={{ ...styles.sigSaveBtn, marginBottom: "0.9rem" }} onClick={() => setTestOpen(true)}>
+              Test prompt
+            </button>
             <div style={styles.blockLabel}>Pending suggestions ({pendingAmend.length})</div>
             <p style={styles.hint}>
               When you edit an Auto Draft before sending, the AI proposes a guideline rule here (and
@@ -372,6 +382,8 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
           </div>
         </div>
       </aside>
+      {/* Outside the aside: its transform would trap a fixed-position modal. */}
+      {testOpen && <PromptTest onClose={() => setTestOpen(false)} />}
     </>
   );
 }

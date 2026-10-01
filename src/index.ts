@@ -63,7 +63,9 @@ import {
   handleSuggestInstagramThreadReply,
 } from "./handlers/instagram-inbox";
 import { handleGetAmendments, handleAmendmentAction } from "./handlers/ai";
+import { handleGetEvalScenarios, handleRunEval } from "./handlers/support-eval";
 import { handleRemoveBackground } from "./handlers/remove-bg";
+import { handleListDelays, handleDraftDelay, handleSendDelay, handleDismissDelay } from "./handlers/delays";
 import { handleShopifyOrderLookup, handleShopifyOrdersByEmail } from "./handlers/shopify";
 import {
   handleUpdateAddress,
@@ -367,6 +369,13 @@ export default {
     if (path === "/api/ai/amendments/action" && request.method === "POST") {
       return handleAmendmentAction(request, env);
     }
+    // Prompt test bench — read-only side-by-side model runs
+    if (path === "/api/ai/eval/scenarios" && request.method === "GET") {
+      return handleGetEvalScenarios(request, env);
+    }
+    if (path === "/api/ai/eval/run" && request.method === "POST") {
+      return handleRunEval(request, env);
+    }
 
     // Instagram pull (live unread DMs, like the email list)
     if (path === "/api/instagram/unread" && request.method === "GET") {
@@ -393,6 +402,11 @@ export default {
     }
 
     // SOTA background removal for the gangsheet tool (fal.ai / BRIA RMBG-2.0)
+    // Proactive delay outreach (Support Assistant "Delays" tab)
+    if (path === "/api/support/delays" && request.method === "GET") return handleListDelays(request, env);
+    if (path === "/api/support/delays/draft" && request.method === "POST") return handleDraftDelay(request, env);
+    if (path === "/api/support/delays/send" && request.method === "POST") return handleSendDelay(request, env);
+    if (path === "/api/support/delays/dismiss" && request.method === "POST") return handleDismissDelay(request, env);
     if (path === "/api/remove-bg" && request.method === "POST") {
       return handleRemoveBackground(request, env);
     }

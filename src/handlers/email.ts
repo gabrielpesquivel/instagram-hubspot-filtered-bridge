@@ -126,7 +126,8 @@ export async function buildEmailSuggestion(
   token: string,
   connEmail: string,
   threadId: string,
-  extraInstruction?: string
+  extraInstruction?: string,
+  model?: string
 ): Promise<EmailSuggestion | null> {
   {
     const detail = await getThreadDetail(token, threadId, connEmail);
@@ -195,6 +196,7 @@ export async function buildEmailSuggestion(
       channel: "email",
       // firstNameFrom falls back to "there" for bare addresses — no real name.
       customerName: customerName && customerName !== "there" ? customerName : undefined,
+      model,
     });
     return { suggestion, subject: detail.subject, actions };
   }
@@ -370,6 +372,23 @@ export async function handleGetEmailAttachment(
 }
 
 /** Send an agent's reply into a Gmail thread, then mark the thread read. */
+/** Append the configured signature to an outgoing plain-text body. Gmail
+ *  signatures are HTML, so when that mode is on the email goes out as HTML;
+ *  otherwise the manual plain-text signature is appended. */
+export async function withSignature(
+  env: Env,
+  token: string,
+  fromEmail: string,
+  text: string
+): Promise<{ body: string; html: boolean }> {
+  if ((await env.PROFILE_CACHE.get(USE_GMAIL_SIG_KEY)) === "true") {
+    const sigHtml = (await getSendAsSignature(token, fromEmail)).trim();
+    return { body: sigHtml ? `${textToHtml(text)}<br><br>${sigHtml}` : textToHtml(text), html: true };
+  }
+  const signature = ((await env.PROFILE_CACHE.get(SIGNATURE_KEY)) || "").trim();
+  return { body: signature && !text.includes(signature) ? `${text}\n\n${signature}` : text, html: false };
+}
+
 export async function handleSendEmailReply(
   request: Request,
   env: Env,
@@ -386,20 +405,7 @@ export async function handleSendEmailReply(
   const text = (body.text || "").replace(/\n{3,}/g, "\n\n").trim();
   if (!text) return jsonResponse({ error: "Empty reply" }, 400);
 
-  const useGmailSig = (await env.PROFILE_CACHE.get(USE_GMAIL_SIG_KEY)) === "true";
-
-  // Build the body + signature. Gmail signatures are HTML, so when that mode is
-  // on we send an HTML email; otherwise we append the manual plain-text one.
-  let emailBody = text;
-  let html = false;
-  if (useGmailSig) {
-    const sigHtml = (await getSendAsSignature(token, conn.email)).trim();
-    emailBody = sigHtml ? `${textToHtml(text)}<br><br>${sigHtml}` : textToHtml(text);
-    html = true;
-  } else {
-    const signature = ((await env.PROFILE_CACHE.get(SIGNATURE_KEY)) || "").trim();
-    if (signature && !text.includes(signature)) emailBody = `${text}\n\n${signature}`;
-  }
+  const { body: emailBody, html } = await withSignature(env, token, conn.email, text);
 
   try {
     const detail = await getThreadDetail(token, threadId, conn.email);

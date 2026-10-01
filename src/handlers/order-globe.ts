@@ -21,7 +21,7 @@ import { aestDate } from "./gangsheet-orders";
 
 const AGG_KEY = "orders_geo_agg";
 const BULK_KEY = "orders_geo_bulk";
-const TRANSIT_KEY = "orders_geo_transit";
+export const TRANSIT_KEY = "orders_geo_transit";
 const SCOPE_KEY = "orders_geo_scope_ok";
 
 // Dispatch point — Canberra, ACT.
@@ -58,7 +58,7 @@ interface BulkState {
   error?: string;
 }
 
-interface TransitShipment {
+export interface TransitShipment {
   o: string; // order name
   lat: number;
   lng: number;
@@ -71,7 +71,7 @@ interface TransitShipment {
   approx: boolean; // true = no carrier events, status inferred from age
 }
 
-interface TransitSnapshot {
+export interface TransitSnapshot {
   refreshedAt: string;
   shipments: TransitShipment[];
   deliveryDays: Record<string, { n: number; avg: number }>; // by country

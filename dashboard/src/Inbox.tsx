@@ -4,13 +4,14 @@ import { showAmendment } from "./amendment";
 import { showActions } from "./action";
 import { onDiscount, type CreatedDiscount } from "./discount";
 import { ManualActions } from "./ActionPrompt";
+import { Delays, fetchDelayCount } from "./Delays";
 
 // ── Unified data model ──────────────────────────────────────────────────────
 // Both channels collapse to a single InboxItem for the list; the thread view
 // branches on `channel`.
 
 type Channel = "instagram" | "email";
-type Filter = Channel;
+type Filter = Channel | "delays";
 // IG threads come from two sources: "store" = webhook-approved conversation in
 // the Durable Object; "pull" = live unread from the Graph Conversations API.
 type Source = "store" | "pull";
@@ -196,6 +197,10 @@ function buildEditorHtml(marked: string): string {
 
 export function Inbox() {
   const [filter, setFilter] = useState<Filter>("email");
+  const [delayCount, setDelayCount] = useState(0);
+  useEffect(() => {
+    fetchDelayCount().then(setDelayCount);
+  }, []);
   const [search, setSearch] = useState("");
 
   const [igConvos, setIgConvos] = useState<IgSummary[]>([]);
@@ -955,14 +960,12 @@ export function Inbox() {
 
   const composerDisabled = windowExpired && selected?.channel === "instagram";
 
-  return (
-    <div style={styles.root}>
-      {/* ── Sidebar ── */}
-      <aside style={styles.sidebar}>
+  const filterPills = (
         <div style={styles.filters}>
           {([
             ["email", "Email", emailCount],
             ["instagram", "Instagram", igCount],
+            ["delays", "Delays", delayCount],
           ] as [Filter, string, number][]).map(([key, label, count]) => (
             <button
               key={key}
@@ -978,6 +981,15 @@ export function Inbox() {
             </button>
           ))}
         </div>
+  );
+
+  if (filter === "delays") return <Delays header={filterPills} onCountChange={setDelayCount} />;
+
+  return (
+    <div style={styles.root}>
+      {/* ── Sidebar ── */}
+      <aside style={styles.sidebar}>
+        {filterPills}
 
         <input
           value={search}

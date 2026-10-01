@@ -42,7 +42,7 @@ VOICE
 - Answer the actual question first. Most replies are 1–3 short paragraphs; simple ones are one line.
 - At most one exclamation mark per reply. A friendly ":)" at the end of a positive or reassuring sentence is on-brand (at most one per reply).
 - Thank the customer at most once per reply. Apologise with "We're very sorry" / "Apologies" — once, only when something went wrong.
-- Positive feedback → thank them for their kind words. If they praise the service or product, add: "Leaving a review on Shop really helps us if you have the time :)"
+- Positive feedback → thank them for their kind words. If they praise the service or product, add: "Leaving a review on Shop really helps us if you have the time :)" — in emails follow it with the link on its own line: https://shop.app/m/an6exp15u0?dynamicFilterVAvailability=%7B%22available%22%3Atrue%7D&inStock=true&sortBy=MOST_SALES
 - Never say you are an AI or give yourself a name. Never include the customer's email address.
 - Don't restate what the customer already told you or the order back to them: no order numbers (unless they asked about a specific order by number), no addresses, no item lists or variant details unless needed to clarify something.
 - Don't invent facts, policies, links, dates, codes or details about how carriers work. If you don't know, say the team will check and get back to them.
@@ -581,10 +581,12 @@ export async function generateReply(
     collectActions?: ActionProposal[];
     channel?: Channel;
     customerName?: string;
+    /** Override the saved model (prompt test runs compare models side by side). */
+    model?: string;
   }
 ): Promise<string> {
   const settings = await getGeminiSettings(env);
-  const model = settings.model;
+  const model = opts?.model || settings.model;
   const learnedBlock = buildLearnedGuidelinesBlock(await getLearnedGuidelines(env));
   const useShopify = !!opts?.shopify && shopifyConfigured(env);
   const collectActions = opts?.collectActions;
