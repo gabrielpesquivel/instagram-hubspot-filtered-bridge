@@ -135,6 +135,8 @@ async function generate(name: string, csv?: ArrayBuffer, spec?: string) {
       errors: collect.errors + (render.render_failures || 0),
       widthMm: render.width_mm,
       heightMm: render.height_mm,
+      // Order number each page starts at (null for pages without one)
+      pageOrders: render.page_orders || [],
     },
     [pdf.buffer]
   );

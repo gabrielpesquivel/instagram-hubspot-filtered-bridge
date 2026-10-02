@@ -18,17 +18,11 @@ export type Entry =
   | { id: number; kind: "design"; path: string; qty: number; order: string }
   | { id: number; kind: "text"; text: string; heightMm: string; color: string; qty: number; order: string };
 
-const DRAFT_KEY = "gangsheet.customSheet.draft";
-
-function loadDraft(): Entry[] {
-  try {
-    const raw = localStorage.getItem(DRAFT_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
+// Drafts used to persist in localStorage under this key; the builder now
+// starts empty every time (and clears after each generate). Drop any old draft.
+try {
+  localStorage.removeItem("gangsheet.customSheet.draft");
+} catch { /* ignore */ }
 
 let nextEntryId = Date.now();
 
@@ -73,15 +67,9 @@ export function CustomSheet(props: {
   onGenerate: (name: string, spec: string, label: string) => void;
 }) {
   const { ready, designs, previews, requestPreview, onGenerate } = props;
-  const [entries, setEntries] = useState<Entry[]>(loadDraft);
-  const [open, setOpen] = useState(() => entries.length > 0);
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [open, setOpen] = useState(false);
   const [sheetName, setSheetName] = useState(defaultSheetName);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(entries));
-    } catch { /* draft is a convenience only */ }
-  }, [entries]);
 
   const byLabel = useMemo(() => {
     const m = new Map<string, Design>();
@@ -108,6 +96,8 @@ export function CustomSheet(props: {
     if (!spec.length) return;
     const name = sheetName.trim() || defaultSheetName();
     onGenerate(name, JSON.stringify(spec), `Custom sheet — ${stickerCount} sticker${stickerCount === 1 ? "" : "s"}`);
+    // Fresh builder for the next sheet — nothing carries over.
+    setEntries([]);
     setSheetName(defaultSheetName());
   }
 
@@ -133,7 +123,7 @@ export function CustomSheet(props: {
           <span style={s.label}>File name</span>
           <input style={{ ...s.input, width: "14rem" }} value={sheetName} onChange={(e) => setSheetName(e.target.value)} />
         </label>
-        <button style={s.iconBtn} title="Hide (draft is kept)" onClick={() => setOpen(false)}>–</button>
+        <button style={s.iconBtn} title="Hide" onClick={() => setOpen(false)}>–</button>
       </div>
 
       <datalist id="cs-flags">{flagNames.map((n) => <option key={n} value={n} />)}</datalist>
@@ -248,7 +238,7 @@ function DesignPicker(props: {
   const { design, byLabel, loading, preview, onPick, requestPreview } = props;
   const [query, setQuery] = useState(design ? designLabel(design) : "");
 
-  // Restored drafts: show the label and fetch the preview once the catalog lands.
+  // Keep the label in sync with the picked design and fetch its preview.
   useEffect(() => {
     if (design) {
       setQuery(designLabel(design));

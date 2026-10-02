@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { PageOutput } from "./cutfile-render";
-import { pltName, pngName } from "./cutfile-render";
+import { orderRangeInName, pltName, pngName } from "./cutfile-render";
 import { makeZip } from "./zip";
 
 // Print Prep — drop the checked/fixed gangsheet .ai (after the manual
@@ -29,8 +29,25 @@ interface Job {
   status: "queued" | "processing" | "done" | "error";
   total: number;
   pages: SheetPage[];
+  /** Order each page starts at, from the gangsheet render (see pltName). */
+  pageOrders?: (string | null)[];
+  /** No render record for this file — .plt names fall back to range + page. */
+  ordersMissing?: boolean;
   error?: string;
   zipUrl?: string;
+}
+
+// Which order each page of this sheet starts at, recorded by the gangsheet
+// page when it rendered the sheet (keyed by the order range in the name).
+async function lookupPageOrders(base: string): Promise<(string | null)[] | null> {
+  try {
+    const res = await fetch(`/api/gangsheet/page-orders?name=${encodeURIComponent(base)}`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { pages?: (string | null)[] };
+    return Array.isArray(data.pages) ? data.pages : null;
+  } catch {
+    return null;
+  }
 }
 
 export function CutFiles() {
@@ -56,7 +73,13 @@ export function CutFiles() {
     busyRef.current = true;
     currentRef.current = next.id;
     updateJob(next.id, (j) => ({ ...j, status: "processing" }));
-    const bytes = await next.file.arrayBuffer();
+    const base = next.file.name.replace(/\.(ai|pdf)$/i, "");
+    const [bytes, pageOrders] = await Promise.all([next.file.arrayBuffer(), lookupPageOrders(base)]);
+    updateJob(next.id, (j) => ({
+      ...j,
+      pageOrders: pageOrders ?? undefined,
+      ordersMissing: !pageOrders && !!orderRangeInName(base),
+    }));
     workerRef.current?.postMessage({ id: next.id, bytes }, [bytes]);
   }
 
@@ -85,7 +108,7 @@ export function CutFiles() {
             pngName: pngName(j.base, out.page),
             pngUrl: URL.createObjectURL(new Blob([out.png as BlobPart], { type: "image/png" })),
             plt,
-            pltName: pltName(j.base, out.page),
+            pltName: pltName(j.base, out.page, j.pageOrders),
             pltUrl: URL.createObjectURL(new Blob([plt as BlobPart], { type: "application/octet-stream" })),
           };
           return { ...j, total: msg.total, pages: [...j.pages, page] };
@@ -225,6 +248,13 @@ export function CutFiles() {
                       `${job.pages.length} page${job.pages.length === 1 ? "" : "s"} · ${job.pages.reduce((n, p) => n + p.boxes, 0)} cut boxes`}
                     {job.status === "error" && job.error}
                   </div>
+                  {job.ordersMissing && job.status !== "error" && (
+                    <div style={styles.warn}>
+                      No render record for this sheet, so pages after the first can't be matched to their order number
+                      — .plt files are named by range + page instead. Sheets rendered in the Gangsheet tool from now on are
+                      recorded automatically.
+                    </div>
+                  )}
                 </div>
                 {job.status === "processing" && <span style={styles.spinner} />}
                 {job.status === "done" && job.zipUrl && (
@@ -244,6 +274,8 @@ export function CutFiles() {
                   <div style={styles.pageNum}>{p.page}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={styles.pageMeta}>
+                      <span style={styles.pltLabel}>{p.pltName}</span>
+                      {" · "}
                       {Math.round(p.widthMm)}×{Math.round(p.heightMm)} mm · {p.boxes} cut boxes
                       {p.segments > 1 && ` · ${p.segments} cut segments`}
                     </div>
@@ -340,6 +372,17 @@ const styles: Record<string, React.CSSProperties> = {
     color: "var(--text-muted)",
   },
   pageMeta: { fontSize: "0.85rem" },
+  pltLabel: {
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    color: "var(--text)",
+    fontWeight: 600,
+  },
+  warn: {
+    marginTop: "0.35rem",
+    fontSize: "0.8rem",
+    color: "#b26a00",
+    lineHeight: 1.4,
+  },
   dlLink: {
     padding: "0.3rem 0.8rem",
     background: "#333",

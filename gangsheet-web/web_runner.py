@@ -267,6 +267,17 @@ def render(name):
         c, placed_items, layout_mgr.num_pages, layout_mgr.page_heights)
     c.save()
 
+    # Order number each page starts at (the "#<order>" in its header row) —
+    # Print Prep names that page's cut file after it, since the header is
+    # outlined geometry the .ai itself can't be asked for. None when the page
+    # has no order-tagged items (custom sheets).
+    page_orders = [None] * layout_mgr.num_pages
+    for _x, _y, page_num, item in placed_items:
+        if item.get('is_header') or not item.get('order_num'):
+            continue
+        if page_orders[page_num - 1] is None:
+            page_orders[page_num - 1] = str(item['order_num'])
+
     return json.dumps({
         'pdf_path': out_path,
         'width_mm': round(config.PAGE_WIDTH / config.MM_TO_PTS),
@@ -274,6 +285,7 @@ def render(name):
         # quick-start sheet for single-sheet jobs.
         'height_mm': round(max(layout_mgr.page_heights) / config.MM_TO_PTS),
         'pages': layout_mgr.num_pages,
+        'page_orders': page_orders,
         # Items whose artwork failed to draw (fluro-yellow tag substituted)
         'render_failures': render_failures,
     })

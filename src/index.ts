@@ -86,6 +86,7 @@ import {
   handleGetDailyOrders,
   handleWipesNotes,
   storeDailyOrders,
+  handlePageOrders,
 } from "./handlers/gangsheet-orders";
 import { renderDailyGangsheet } from "./handlers/gangsheet-autorender";
 import { handleDigest } from "./handlers/digest";
@@ -431,6 +432,12 @@ export default {
     }
     if (path === "/api/gangsheet/daily" && request.method === "GET") {
       return handleGetDailyOrders(request, env);
+    }
+    // Page → first-order map recorded by the gangsheet page after each
+    // render; Print Prep reads it to name .plt files after the order a page
+    // starts at.
+    if (path === "/api/gangsheet/page-orders" && (request.method === "GET" || request.method === "POST")) {
+      return handlePageOrders(request, env);
     }
     // Manual re-run of the automatic render (e.g. after a failed cron). Uses
     // the already-stored daily pull; result appears under /api/files for today.

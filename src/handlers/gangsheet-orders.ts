@@ -273,6 +273,51 @@ export async function handleWipesNotes(request: Request, env: Env): Promise<Resp
 
 // GET /api/gangsheet/daily?date=YYYY-MM-DD — the cron-stored pull for a day
 // (default: today AEST). 404 when the cron hasn't run or found nothing.
+// --- Page → first order map (for Print Prep .plt names) ---------------------
+//
+// The gangsheet page POSTs {name, pages: [order|null, ...]} when a sheet
+// finishes rendering; Print Prep GETs it back by the order range in the
+// dropped .ai's file name. Keyed by the <start>-<end> range when the name has
+// one (so renamed files like "30623-30747 fixed.ai" still match), else by the
+// sanitised name. Kept 180 days.
+const PAGE_ORDERS_PREFIX = "gangsheet_page_orders:";
+const PAGE_ORDERS_TTL = 180 * 24 * 3600;
+
+function pageOrdersKey(name: string): string | null {
+  const range = name.match(/(\d{3,})\s*-\s*(\d{3,})/);
+  const key = range ? `${range[1]}-${range[2]}` : name.trim().replace(/[^A-Za-z0-9._-]/g, "_");
+  return key ? PAGE_ORDERS_PREFIX + key : null;
+}
+
+export async function handlePageOrders(request: Request, env: Env): Promise<Response> {
+  if (!(await isAuthenticated(request, env))) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+  if (request.method === "POST") {
+    let body: { name?: unknown; pages?: unknown };
+    try {
+      body = await request.json();
+    } catch {
+      return jsonResponse({ error: "Invalid JSON" }, 400);
+    }
+    const name = typeof body.name === "string" ? body.name : "";
+    const pages = Array.isArray(body.pages)
+      ? body.pages.map((p) => (typeof p === "string" && /^\d+$/.test(p) ? p : null))
+      : null;
+    const key = pageOrdersKey(name);
+    if (!key || !pages || pages.length === 0 || pages.length > 200) {
+      return jsonResponse({ error: "name and pages required" }, 400);
+    }
+    await env.PROFILE_CACHE.put(key, JSON.stringify(pages), { expirationTtl: PAGE_ORDERS_TTL });
+    return jsonResponse({ ok: true, key: key.slice(PAGE_ORDERS_PREFIX.length), pages });
+  }
+  const name = new URL(request.url).searchParams.get("name") || "";
+  const key = pageOrdersKey(name);
+  const stored = key ? await env.PROFILE_CACHE.get(key) : null;
+  if (!stored) return jsonResponse({ error: "Not found" }, 404);
+  return jsonResponse({ pages: JSON.parse(stored) });
+}
+
 export async function handleGetDailyOrders(request: Request, env: Env): Promise<Response> {
   if (!(await isAuthenticated(request, env))) {
     return jsonResponse({ error: "Unauthorized" }, 401);

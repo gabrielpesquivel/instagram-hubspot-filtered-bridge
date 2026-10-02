@@ -188,6 +188,23 @@ function reportAuto(result: {
   (window as unknown as { __gangsheetAutoResult?: unknown }).__gangsheetAutoResult = result;
 }
 
+// Tell the worker which order each page of a finished sheet starts at, so
+// Print Prep can name that page's .plt after the "#<order>" in its header
+// (the header is outlined geometry — unreadable from the .ai). Keyed by the
+// sheet name (order range); failures are non-fatal.
+async function recordPageOrders(name: string, pageOrders: (string | null)[] | undefined) {
+  if (!pageOrders || !pageOrders.some(Boolean)) return;
+  try {
+    await fetch("/api/gangsheet/page-orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, pages: pageOrders }),
+    });
+  } catch (e) {
+    console.warn("page-orders record failed", e);
+  }
+}
+
 // First and last order numbers in a pulled CSV (Number column) — the auto
 // upload is named <start>-<end>.ai.
 function orderRange(csv: string): { start: number; end: number } | null {
@@ -419,6 +436,7 @@ export function Gangsheet() {
           break;
         }
         case "done": {
+          await recordPageOrders(msg.name, msg.pageOrders);
           // Auto mode: upload the sheet to R2 as the day's .ai instead of
           // downloading, then hand the result to the puppeteer driver.
           if (autoJobNameRef.current && msg.name === autoJobNameRef.current) {

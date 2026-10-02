@@ -293,19 +293,28 @@ export function processAi(
 
 // --- file names ------------------------------------------------------------
 
-const MONTHS = [
-  "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE",
-  "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
-];
-
 /** "30623-30747 - 2-02.png" — matches the Illustrator artboard export names. */
 export function pngName(base: string, page: number): string {
   return `${base} - ${page}-${String(page).padStart(2, "0")}.png`;
 }
 
-/** "SEPTEMBER 29 - 1 (30623).plt"; order number only known for page 1. */
-export function pltName(base: string, page: number, date = new Date()): string {
-  const day = `${MONTHS[date.getMonth()]} ${date.getDate()}`;
-  const first = page === 1 ? base.match(/^(\d+)/)?.[1] : undefined;
-  return first ? `${day} - ${page} (${first}).plt` : `${day} - ${page}.plt`;
+/** Order range in a gangsheet file name ("30623-30747 fixed.ai"), if any. */
+export function orderRangeInName(base: string): { start: string; end: string } | null {
+  const m = base.match(/(\d{3,})\s*-\s*(\d{3,})/);
+  return m ? { start: m[1], end: m[2] } : null;
+}
+
+/**
+ * "30650.plt" — the order number printed top-left of that page (its header
+ * "#<order>"), looked up from the gangsheet render via /api/gangsheet/
+ * page-orders. The cutter ignores long file names, so nothing else goes in.
+ * Without a lookup, page 1 is the range start from the file name and later
+ * pages fall back to "<start>-p<n>.plt".
+ */
+export function pltName(base: string, page: number, pageOrders?: (string | null)[]): string {
+  const known = pageOrders?.[page - 1];
+  if (known) return `${known}.plt`;
+  const start = orderRangeInName(base)?.start ?? base.match(/^(\d+)/)?.[1];
+  if (!start) return `page-${page}.plt`;
+  return page === 1 ? `${start}.plt` : `${start}-p${page}.plt`;
 }
