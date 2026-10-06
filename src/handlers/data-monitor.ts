@@ -5,8 +5,8 @@ import { cerr } from "../services/logger";
 import { aestDate } from "./gangsheet-orders";
 
 // Data Monitor (#/data): sales per main market (orders, sales, AOV, units,
-// discounts, sessions, conversion) and, for every market in the theme's kit vs
-// % split test (Essence theme, snippets/bundle-test-head.liquid), the two
+// discounts, sessions, conversion) and, for every market in the theme's Kit vs
+// Tiers split test (Essence theme, snippets/bundle-test-head.liquid), the two
 // groups side by side.
 //
 //   Sessions — the theme sends one beacon per storefront session (first page

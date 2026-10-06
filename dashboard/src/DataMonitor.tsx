@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 // Data Monitor: sales per main market (orders, sales, AOV, units, discounts,
-// sessions, conversion) and, for every market in the storefront's kit vs %
+// sessions, conversion) and, for every market in the storefront's Kit vs Tiers
 // split test, the two groups side by side with lift and significance.
 // Data: GET /api/data-monitor (handlers/data-monitor.ts), cached 5 min.
 // Sessions come from the theme's beacon (snippets/bundle-test-head.liquid in
@@ -102,6 +102,9 @@ const aov = (c: Cell) => div(c.revenue, c.orders);
 const crVisitor = (c: Cell) => div(c.convOrders, c.visitors);
 // Revenue per visitor uses the same tracked-period orders as the conversion rate.
 const rpv = (c: Cell) => div(c.revenue * div(c.convOrders, c.orders), c.visitors);
+// Discount rate = discounts ÷ products before discounts (revenue is after discounts).
+const discRate = (c: Cell) => div(c.discounts, c.revenue + c.discounts);
+const upo = (c: Cell) => div(c.units, c.orders);
 const lift = (kit: number, tier: number) => (tier > 0 && kit > 0 ? kit / tier - 1 : null);
 const plural = (n: number, word: string) => `${int(n)} ${word}${n === 1 ? "" : "s"}`;
 
@@ -113,7 +116,7 @@ function phi(z: number): number {
 }
 
 interface Test {
-  p: number | null; // two-sided p-value, kit vs % conversion per visitor
+  p: number | null; // two-sided p-value, Kit vs Tiers conversion per visitor
   needed: number | null; // visitors per group to detect a 10% relative lift (80% power, 5% two-sided)
 }
 function testOf(kit: Cell, tier: Cell): Test {
@@ -269,7 +272,7 @@ function Headline({ r }: { r: Report }) {
 
 type Status = { label: string; tone: "" | "good" | "bad"; detail: string };
 
-/** Plain-English read of kit vs % for one market. */
+/** Plain-English read of Kit vs Tiers for one market. */
 function statusOf(kit: Cell, tier: Cell): Status {
   const t = testOf(kit, tier);
   const crLift = lift(crVisitor(kit), crVisitor(tier)) ?? 0;
@@ -284,7 +287,7 @@ function statusOf(kit: Cell, tier: Cell): Status {
   if (t.p !== null && t.p < 0.05) {
     return crLift > 0
       ? { label: "Kit is winning", tone: "good", detail: `Significant (p = ${t.p.toFixed(3)}).` }
-      : { label: "% is winning", tone: "bad", detail: `Significant (p = ${t.p.toFixed(3)}).` };
+      : { label: "Tiers are winning", tone: "bad", detail: `Significant (p = ${t.p.toFixed(3)}).` };
   }
   return { label: "No clear winner yet", tone: "", detail: `p = ${t.p === null ? "–" : t.p.toFixed(2)} · ${progress}` };
 }
@@ -312,6 +315,16 @@ function Side({ name, c }: { name: string; c: Cell }) {
         <div>
           <div className={`dm-big${c.orders ? "" : " none"}`}>{c.orders ? money(aov(c), 0) : "–"}</div>
           <div className="dm-cap">AOV</div>
+        </div>
+      </div>
+      <div className="dm-pair dm-minor">
+        <div>
+          <div className={`dm-big${c.orders ? "" : " none"}`}>{c.orders ? upo(c).toFixed(1) : "–"}</div>
+          <div className="dm-cap">units / order</div>
+        </div>
+        <div>
+          <div className={`dm-big${c.orders ? "" : " none"}`}>{c.orders ? pct(discRate(c), 1) : "–"}</div>
+          <div className="dm-cap">discount rate</div>
         </div>
       </div>
       <div className="dm-small">
@@ -346,12 +359,13 @@ function MarketCard({ r, keyName, label, split, wide }: { r: Report; keyName: Ma
         <>
           <div className="dm-compare">
             <Side name="Kit" c={m.kit} />
-            <Side name="%" c={m.tier} />
+            <Side name="Tiers" c={m.tier} />
           </div>
           <div className="dm-lifts">
-            <span className="dm-lifts-title">Kit vs %</span>
+            <span className="dm-lifts-title">Kit vs Tiers</span>
             <Lift label="conversion" value={lift(crVisitor(m.kit), crVisitor(m.tier))} judged={judged} />
             <Lift label="AOV" value={lift(aov(m.kit), aov(m.tier))} judged={judged} />
+            <Lift label="units / order" value={lift(upo(m.kit), upo(m.tier))} judged={judged} />
             <Lift label="revenue / visitor" value={lift(rpv(m.kit), rpv(m.tier))} judged={judged} />
           </div>
           <div className="dm-detail">{status.detail}</div>
@@ -362,10 +376,16 @@ function MarketCard({ r, keyName, label, split, wide }: { r: Report; keyName: Ma
 }
 
 function Cards({ r }: { r: Report }) {
+  // Highest sales first; the UK (not in the test) always sits last.
+  const rows = [...MARKET_ROWS].sort((a, b) => {
+    if (a.key === "GB") return 1;
+    if (b.key === "GB") return -1;
+    return r.markets[b.key].total.sales - r.markets[a.key].total.sales || r.markets[b.key].total.orders - r.markets[a.key].total.orders;
+  });
   return (
     <div className="dm-grid">
       <MarketCard r={r} keyName="NON_UK" label="All test markets" split wide />
-      {MARKET_ROWS.map((m) => (
+      {rows.map((m) => (
         <MarketCard key={m.key} r={r} keyName={m.key} label={m.label} split={m.split} />
       ))}
     </div>
@@ -387,8 +407,8 @@ function Daily({ r }: { r: Report }) {
               <th className="num">AOV</th>
               <th className="num">Kit conv.</th>
               <th className="num">Kit orders</th>
-              <th className="num">% conv.</th>
-              <th className="num">% orders</th>
+              <th className="num">Tiers conv.</th>
+              <th className="num">Tiers orders</th>
             </tr>
           </thead>
           <tbody>
@@ -423,7 +443,7 @@ function Footnotes({ r }: { r: Report }) {
       ; conversion only counts orders placed since then
       {r.ordersBeforeTracking > 0 && ` (${int(r.ordersBeforeTracking)} earlier orders are in orders, sales and AOV only)`}.
       {r.untracked.orders > 0 && ` ${int(r.untracked.orders)} orders carry no test group (${sources}) — Shop app, Buy it now, drafts or carts from before launch; in market totals only.`}{" "}
-      Kit / % = the order's test group. AOV = products after discounts ÷ orders; sales = order totals incl. shipping and tax; both net of
+      Kit / Tiers = the order's test group. AOV = products after discounts ÷ orders; discount rate = discounts ÷ products before discounts; sales = order totals incl. shipping and tax; both net of
       refunds, in AUD. Markets by shipping country; visitors by the storefront country they browsed. Differences are coloured once both groups
       have 100+ visitors and 10+ orders between them.
     </p>
