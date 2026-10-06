@@ -52,6 +52,9 @@ export interface Env {
   FILTER_MIN_FOLLOWERS: string;
   CACHE_TTL_SECONDS: string;
 
+  // Data Monitor (#/data): storefront sessions from the theme's split-test beacon
+  DATA_DB: D1Database;
+
   // Dashboard
   ASSETS: Fetcher;
   DASHBOARD_PASSWORD: string;

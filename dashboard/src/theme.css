@@ -772,3 +772,65 @@ button {
 @media (max-width: 560px) {
   .ads-kpis, .ads-kpis-inset { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ── Data Monitor (#/data): one card per market, kit vs % side by side ── */
+.dm-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; }
+.dm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 1rem; }
+.dm-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.25rem 1.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.dm-card.wide { grid-column: 1 / -1; }
+.dm-head { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.dm-market { margin: 0; font-size: 1.6rem; font-weight: 800; letter-spacing: -0.01em; line-height: 1.1; }
+.dm-card.wide .dm-market { font-size: 1.9rem; }
+.dm-status {
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.dm-status.good { color: var(--ads-good); border-color: currentColor; }
+.dm-status.bad { color: var(--ads-bad); border-color: currentColor; }
+.dm-sales { display: flex; flex-wrap: wrap; gap: 0.25rem 1.1rem; font-size: 0.85rem; color: var(--text-muted); }
+.dm-sales b { color: var(--text); font-size: 1rem; font-variant-numeric: tabular-nums; }
+.dm-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.dm-side { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem 1rem; }
+.dm-side.kit { border-top: 3px solid var(--accent); }
+.dm-side.tier { border-top: 3px solid var(--text-faint); }
+.dm-side-name { font-size: 0.8rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 0.4rem; }
+.dm-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.dm-big { font-size: 1.85rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.dm-card.wide .dm-big { font-size: 2.2rem; }
+.dm-cap { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.15rem; }
+.dm-small { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.6rem; font-variant-numeric: tabular-nums; }
+.dm-lifts { display: flex; align-items: baseline; gap: 1.25rem; flex-wrap: wrap; }
+.dm-lifts-title { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.dm-lift { display: inline-flex; align-items: baseline; gap: 0.35rem; }
+.dm-lift-value { font-size: 1.15rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.dm-lift-label { font-size: 0.75rem; color: var(--text-muted); }
+.dm-lift.good .dm-lift-value { color: var(--ads-good); }
+.dm-lift.bad .dm-lift-value { color: var(--ads-bad); }
+.dm-lift.none .dm-lift-value, .dm-big.none { color: var(--text-faint); font-weight: 400; }
+.dm-detail { font-size: 0.75rem; color: var(--text-faint); }
+.dm-daily { margin-top: 1.75rem; }
+.dm-daily > summary { cursor: pointer; font-weight: 700; font-size: 0.95rem; margin-bottom: 0.75rem; }
+@media (max-width: 860px) { .dm-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) {
+  .dm-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dm-grid { grid-template-columns: minmax(0, 1fr); }
+  .dm-card { padding: 1rem; }
+  .dm-compare { gap: 0.5rem; }
+  .dm-side { padding: 0.7rem 0.75rem; }
+  .dm-pair { grid-template-columns: minmax(0, 1fr); gap: 0.5rem; }
+  .dm-big, .dm-card.wide .dm-big { font-size: 1.45rem; }
+  .dm-market, .dm-card.wide .dm-market { font-size: 1.4rem; }
+}

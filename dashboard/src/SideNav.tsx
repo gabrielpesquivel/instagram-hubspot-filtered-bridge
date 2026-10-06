@@ -15,6 +15,7 @@ export type NavTool =
   | "stocktake"
   | "roster"
   | "ads"
+  | "data"
   | "bridge";
 
 interface NavItem {
@@ -76,6 +77,12 @@ const ICONS = {
       <path d="M6.5 16V11M11 16V7.5M15.5 16v-5.5M20 16V4.5" />
     </svg>
   ),
+  data: (
+    <svg viewBox="0 0 24 24" {...stroke}>
+      <path d="M3.5 18.5 9 12l4 3.5 7.5-9" />
+      <path d="M15.5 6.5h5v5" />
+    </svg>
+  ),
   roster: (
     <svg viewBox="0 0 24 24" {...stroke}>
       <rect x="3.5" y="5" width="17" height="15.5" rx="2" />
@@ -111,7 +118,10 @@ const GROUPS: { heading: string; items: NavItem[] }[] = [
   },
   {
     heading: "Sales",
-    items: [{ tool: "ads", hash: "#/ads", label: "Meta Ads Hub", icon: ICONS.ads }],
+    items: [
+      { tool: "ads", hash: "#/ads", label: "Meta Ads Hub", icon: ICONS.ads },
+      { tool: "data", hash: "#/data", label: "Data Monitor", icon: ICONS.data },
+    ],
   },
 ];
 

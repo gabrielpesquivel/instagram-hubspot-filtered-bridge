@@ -121,6 +121,7 @@ import {
 } from "./handlers/meta-ads";
 import { handleGetOrderGlobe, handleOrderGlobeBackfill, handleOrderGlobeRefresh, syncOrderGlobe } from "./handlers/order-globe";
 import { autoDraftEmails } from "./handlers/email-autodraft";
+import { handleSessionHit, handleGetDataMonitor } from "./handlers/data-monitor";
 import {
   handleGoogleAuthInit,
   handleGoogleCallback,
@@ -515,6 +516,15 @@ export default {
     }
     if (path === "/api/reviews" && request.method === "POST") {
       return handlePostShopReviews(request, env);
+    }
+
+    // Data Monitor (#/data): storefront session beacon (public — the theme's
+    // split-test snippet) + the per-market sales / split-test report
+    if (path === "/api/st/hit" && request.method === "POST") {
+      return handleSessionHit(request, env);
+    }
+    if (path === "/api/data-monitor" && request.method === "GET") {
+      return handleGetDataMonitor(request, env);
     }
 
     // Website status + reviews (home-page card)

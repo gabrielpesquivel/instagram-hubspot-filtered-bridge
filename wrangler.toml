@@ -54,6 +54,15 @@ id = "db904047158e47118ea28704c475a41b"
 binding = "GANGSHEET_FILES"
 bucket_name = "bootink-gangsheets"
 
+# D1 database for the Data Monitor (#/data): one row per storefront session,
+# sent by the theme's kit vs % split-test beacon (POST /api/st/hit, public).
+# Schema: migrations/ — apply with `npx wrangler d1 migrations apply bootink-data-monitor --remote`.
+[[d1_databases]]
+binding = "DATA_DB"
+database_name = "bootink-data-monitor"
+database_id = "dbb48205-609d-454a-8404-6738b4af7e87"
+migrations_dir = "migrations"
+
 # Environment variables (non-secret)
 [vars]
 FILTER_MIN_FOLLOWERS = "5000"
